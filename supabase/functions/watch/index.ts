@@ -5,6 +5,7 @@ const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SE
   auth: { persistSession: false },
 });
 const enc = new TextEncoder();
+const env = (k: string) => Deno.env.get(k)?.trim();
 
 async function safeEqual(a: string, b: string): Promise<boolean> {
   const [ha, hb] = await Promise.all([
@@ -128,14 +129,14 @@ Deno.serve(async (req) => {
 
   try {
     if (path.startsWith("/mcp/")) {
-      const secret = Deno.env.get("MCP_PATH_SECRET");
+      const secret = env("MCP_PATH_SECRET");
       if (!secret || !(await safeEqual(path, `/mcp/${secret}`))) return new Response("Not Found", { status: 404, headers: HEADERS });
       return await handleMcp(req);
     }
     if (path === "/health" && req.method === "GET") return json({ ok: true });
 
     if (path === "/card" && req.method === "POST") {
-      if (!(await authorized(req, Deno.env.get("WRITE_TOKEN")))) return new Response(null, { status: 401, headers: HEADERS });
+      if (!(await authorized(req, env("WRITE_TOKEN")))) return new Response(null, { status: 401, headers: HEADERS });
       let body: any;
       try { body = await req.json(); } catch { return json({ error: "invalid JSON" }, 400); }
       const text = validateText(body?.text);
@@ -144,7 +145,7 @@ Deno.serve(async (req) => {
     }
 
     if (path === "/card/latest" && req.method === "GET") {
-      if (!(await authorized(req, Deno.env.get("READ_TOKEN")))) return new Response(null, { status: 401, headers: HEADERS });
+      if (!(await authorized(req, env("READ_TOKEN")))) return new Response(null, { status: 401, headers: HEADERS });
       const card = await latestCard();
       if (!card) return json({ error: "no cards" }, 404);
       if (url.searchParams.get("format") === "text")
