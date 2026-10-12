@@ -1,0 +1,2 @@
+[functions.watch]
+verify_jwt = false
