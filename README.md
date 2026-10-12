@@ -25,7 +25,7 @@ curl "https://watch.oliverseydlitz.com/card/latest?format=text" \
 ## Setup
 1. **Database**: `supabase/migrations/*_watch_cards.sql` (already applied to the project).
 2. **Edge function**: `supabase/functions/watch/index.ts`, deployed with JWT verification **off** (the function checks its own tokens).
-3. **Secrets**: Supabase dashboard -> Edge Functions -> Secrets. Add `WRITE_TOKEN`, `READ_TOKEN`, `MCP_PATH_SECRET` (each e.g. `openssl rand -hex 24`, or generated in a password manager).
+3. **Secrets**: Supabase dashboard -> Edge Functions -> Secrets. Add `WRITE_TOKEN`, `READ_TOKEN`, `MCP_PATH_SECRET` (each e.g. `openssl rand -hex 24`, or generated in a password manager). Optional: `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` to get a "Watch card #<id>" Telegram message on every new card (skipped if either is missing).
 4. **Domain**: Cloudflare dashboard -> Workers & Pages -> Create -> Worker -> paste `cloudflare/worker.js` -> Deploy -> Settings -> Domains & Routes -> Add -> Custom domain -> `watch.oliverseydlitz.com`. Cloudflare creates the DNS record.
 5. **Claude.ai**: Settings -> Connectors -> Add custom connector -> `https://watch.oliverseydlitz.com/mcp/<MCP_PATH_SECRET>` (no auth).
 

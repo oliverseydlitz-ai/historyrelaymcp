@@ -54,6 +54,8 @@ MCP tools:
 
 Methods handled: `initialize`, `ping`, `tools/list`, `tools/call`. Notifications get a 202.
 
+Telegram notification: after every successful insert (both `POST /card` and `save_card`; the hook lives in `insertCard`), the function calls Telegram Bot API `sendMessage` to `TELEGRAM_CHAT_ID` with the text `Watch card #<id>`. It uses a 3 s AbortController timeout and is wrapped in try/catch. A failure only logs the HTTP status or error name, never the token or URL, and never changes the API/MCP response. If either env var is missing, the call is skipped silently. It is awaited, so a slow Telegram can add up to 3 s to a save.
+
 ## Data
 ```sql
 create table public.watch_cards (
@@ -66,7 +68,7 @@ create table public.watch_cards (
 Pruning: after each insert, the function deletes everything beyond the newest 50 rows. This is two queries, not atomic, so two concurrent writes could briefly leave 51 rows. That's acceptable.
 
 ## Secrets
-Edge Function secrets are set in the Supabase dashboard: `WRITE_TOKEN`, `READ_TOKEN`, `MCP_PATH_SECRET` (48 hex chars each). Oliver keeps the values in his password manager. **Never commit them or write them into this file.**
+Edge Function secrets are set in the Supabase dashboard: `WRITE_TOKEN`, `READ_TOKEN`, `MCP_PATH_SECRET` (48 hex chars each), plus optional `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID`. Oliver keeps the values in his password manager. **Never commit them or write them into this file.**
 
 GitHub repo secret: `SUPABASE_ACCESS_TOKEN`, a fine-grained Supabase token scoped to this project with Edge Functions read-write only. **It expires.** When the deploy Action starts failing with auth errors, generate a new one with the same scope.
 

@@ -30,12 +30,34 @@ function validateText(raw: unknown): string | null {
   return t.length === 0 || t.length > MAX_LEN ? null : t;
 }
 
+// Best-effort Telegram ping; never throws, never logs the token.
+async function notifyTelegram(id: number) {
+  const token = env("TELEGRAM_BOT_TOKEN"), chatId = env("TELEGRAM_CHAT_ID");
+  if (!token || !chatId) return;
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 3000);
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: chatId, text: `Watch card #${id}` }),
+      signal: ctrl.signal,
+    });
+    if (!res.ok) console.error(`telegram sendMessage failed: HTTP ${res.status}`);
+  } catch (e) {
+    console.error(`telegram sendMessage failed: ${e instanceof Error ? e.name : "unknown error"}`);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function insertCard(text: string) {
   const { data, error } = await db.from("watch_cards").insert({ text }).select("id, created_at").single();
   if (error || !data) throw new Error("insert failed");
   // Keep only the newest 50 rows.
   const { data: old } = await db.from("watch_cards").select("id").order("id", { ascending: false }).range(50, 1000);
   if (old && old.length) await db.from("watch_cards").delete().in("id", old.map((r) => r.id));
+  await notifyTelegram(data.id as number);
   return { id: data.id as number, created_at: data.created_at as string };
 }
 
