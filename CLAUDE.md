@@ -35,6 +35,7 @@ Postgres table public.watch_cards  (project "oliverseydlitz-ai's Project", ref j
 | `cloudflare/worker.js` | Proxy Worker (~10 lines) |
 | `cloudflare/wrangler.jsonc` | Worker name `watch-card-proxy`, custom domain route `watch.oliverseydlitz.com` |
 | `.github/workflows/deploy-supabase.yml` | On push to `main` touching `supabase/**`: `supabase functions deploy watch --no-verify-jwt` |
+| `.github/workflows/keepalive.yml` | Daily cron (06:17 UTC) that curls `/health` so the free Supabase project doesn't pause |
 | `README.md` | Endpoints, curl examples, setup, secret rotation |
 
 ## API
@@ -42,7 +43,7 @@ Every response has `Cache-Control: no-store`. Tokens are compared in constant ti
 
 | Method | Path | Auth | Behaviour |
 |---|---|---|---|
-| GET | `/health` | none | `{"ok":true}` |
+| GET | `/health` | none | Runs a 1-row DB read; `{"ok":true}`, or 503 `{"ok":false}` if the DB fails |
 | POST | `/card` | `Bearer WRITE_TOKEN` | `{"text"}`, trimmed, 1–1000 chars, else 400. Returns `{id, created_at}` |
 | GET | `/card/latest` | `Bearer READ_TOKEN` | `{id, text, created_at}`, or 404 if empty. `?format=text` returns `text/plain` |
 | POST | `/mcp/<MCP_PATH_SECRET>` | secret path | MCP Streamable HTTP, stateless, JSON responses. A wrong `/mcp/...` path returns 404 "Not Found". GET on the right path returns 405 (Safari shows that as a download) |
@@ -79,6 +80,9 @@ Rotation: change the value in Supabase (Edge Functions → Secrets). Rotating `M
 - **Function code:** edit `supabase/functions/watch/index.ts` and push to `main`. The Action redeploys. Verify with the Watch Card MCP tools.
 - **Proxy:** edit `cloudflare/*` and push to `main`. Cloudflare Workers Builds redeploys (root dir `cloudflare`, deploy command `npx wrangler deploy`, preview builds off).
 - **Schema:** the Action does NOT run migrations. Apply them through the Supabase MCP tool and also add the SQL file under `supabase/migrations/`.
+
+## Keepalive
+Supabase pauses free projects after ~7 days without activity. The keepalive workflow hits `/health` daily, which reads the DB. **GitHub disables scheduled workflows in public repos after 60 days with no repo activity.** If that happens, re-enable it in the Actions tab (GitHub emails a warning first).
 
 ## Gotchas we hit
 - **Secrets saved with the name prefix.** The value field got `MCP_PATH_SECRET=be47...` instead of just the hex. Supabase's DIGEST column is plain SHA-256 of the stored value, so you can check a value with `printf %s "<value>" | sha256sum`. The decisive test is behaviour: the MCP URL returns 404 if the secret is wrong and 405 or a download if it's right.

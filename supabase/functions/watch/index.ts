@@ -155,7 +155,11 @@ Deno.serve(async (req) => {
       if (!secret || !(await safeEqual(path, `/mcp/${secret}`))) return new Response("Not Found", { status: 404, headers: HEADERS });
       return await handleMcp(req);
     }
-    if (path === "/health" && req.method === "GET") return json({ ok: true });
+    if (path === "/health" && req.method === "GET") {
+      // Touch the DB so pings count as project activity (keeps the free tier from pausing).
+      const { error } = await db.from("watch_cards").select("id").limit(1);
+      return error ? json({ ok: false }, 503) : json({ ok: true });
+    }
 
     if (path === "/card" && req.method === "POST") {
       if (!(await authorized(req, env("WRITE_TOKEN")))) return new Response(null, { status: 401, headers: HEADERS });

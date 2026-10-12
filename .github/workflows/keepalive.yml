@@ -1,0 +1,13 @@
+name: Keepalive
+# Daily ping so the free Supabase project doesn't pause for inactivity.
+# /health runs a tiny DB query. A failed run emails you via GitHub.
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - run: curl -fsS --retry 3 --retry-delay 10 https://watch.oliverseydlitz.com/health
