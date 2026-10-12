@@ -9,6 +9,7 @@ Oliver works **phone-only**: no PC, no local wrangler/Supabase CLI. All changes 
 - iPhone Shortcut: `GET /card/latest?format=text` with `READ_TOKEN` returns the card text.
 - `https://watch.oliverseydlitz.com/health` returns `{"ok":true}`.
 - GitHub Action deploy of the Supabase function: green.
+- Telegram notification: card #5 produced "Watch card #5" from bot `oliver_watchcard2_bot` (the first bot, `oliver_watchcard_bot`, was replaced because its token was pasted into chat).
 - Not done yet: rendering the card as an image on the watch (Scriptable script or Photos face).
 
 ## Architecture
