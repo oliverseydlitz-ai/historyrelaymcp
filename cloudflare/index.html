@@ -3,517 +3,783 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#0b0b0f">
+<meta name="theme-color" content="#f2f2f7" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
+<meta name="color-scheme" content="light dark">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Watch Cards">
 <meta name="robots" content="noindex">
 <title>Watch Cards</title>
 <style>
+  /* ---------- Tokens: iOS system colors, light + dark ---------- */
   :root {
-    --bg: #0b0b0f;
-    --surface: #16161d;
-    --surface-2: #1e1e27;
-    --border: #2a2a35;
-    --text: #f2f2f5;
-    --muted: #8b8b99;
-    --accent: #7c9cff;
-    --accent-2: #b48cff;
-    --danger: #ff6b6b;
+    --bg: #f2f2f7;               /* systemGroupedBackground */
+    --cell: #ffffff;             /* secondarySystemGroupedBackground */
+    --label: #000000;
+    --label-2: rgba(60, 60, 67, 0.6);
+    --label-3: rgba(60, 60, 67, 0.3);
+    --sep: rgba(60, 60, 67, 0.29);
+    --fill: rgba(120, 120, 128, 0.12);
+    --fill-press: rgba(120, 120, 128, 0.2);
+    --tint: #007aff;
+    --red: #ff3b30;
+    --green: #34c759;
+    --material: rgba(242, 242, 247, 0.72);
+    --glass: rgba(255, 255, 255, 0.7);
+    --glass-edge: rgba(255, 255, 255, 0.9);
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
   }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #000000;
+      --cell: #1c1c1e;
+      --label: #ffffff;
+      --label-2: rgba(235, 235, 245, 0.6);
+      --label-3: rgba(235, 235, 245, 0.3);
+      --sep: rgba(84, 84, 88, 0.6);
+      --fill: rgba(118, 118, 128, 0.24);
+      --fill-press: rgba(118, 118, 128, 0.36);
+      --tint: #0a84ff;
+      --red: #ff453a;
+      --green: #30d158;
+      --material: rgba(18, 18, 20, 0.72);
+      --glass: rgba(44, 44, 46, 0.7);
+      --glass-edge: rgba(255, 255, 255, 0.12);
+      --shadow: none;
+    }
+  }
+
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-  html, body { margin: 0; background: var(--bg); color: var(--text); }
+  html { -webkit-text-size-adjust: 100%; }
   body {
-    font: 16px/1.45 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
-    min-height: 100dvh;
+    margin: 0; background: var(--bg); color: var(--label);
+    font: 100%/1.4 -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  button { font: inherit; color: inherit; }
+  :focus-visible { outline: 2px solid var(--tint); outline-offset: 2px; }
+
+  /* ---------- Screens ---------- */
+  .screen { display: none; will-change: opacity, transform; }
+  .screen.page { padding: 0 max(16px, env(safe-area-inset-right)) calc(32px + env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left)); max-width: 640px; margin: 0 auto; }
+
+  /* ---------- Navigation bar: translucent material that appears as content scrolls under it ---------- */
+  .nav { position: sticky; top: 0; z-index: 5; margin: 0 -16px; padding-top: env(safe-area-inset-top); }
+  .nav::before {
+    content: ""; position: absolute; inset: 0; opacity: var(--p, 0);
+    background: var(--material);
+    -webkit-backdrop-filter: blur(20px) saturate(180%); backdrop-filter: blur(20px) saturate(180%);
+  }
+  .nav-bar { position: relative; height: 2.75rem; display: flex; align-items: center; justify-content: center; padding: 0 16px; }
+  .nav-title { font-size: 1.0625rem; font-weight: 600; letter-spacing: -0.01em; opacity: var(--p, 0); }
+  .nav-actions { position: absolute; right: 16px; display: flex; gap: 10px; }
+  .glass-btn {
+    width: 2.25rem; height: 2.25rem; border-radius: 50%; border: 0; padding: 0; cursor: pointer;
+    display: grid; place-items: center; color: var(--tint);
+    background: var(--glass); box-shadow: inset 0 0.5px 0 var(--glass-edge), 0 1px 3px rgba(0, 0, 0, 0.08);
+    -webkit-backdrop-filter: blur(16px) saturate(180%); backdrop-filter: blur(16px) saturate(180%);
+    transition: transform 0.25s ease-out;
+  }
+  .glass-btn:active { transform: scale(0.9); transition: transform 0.08s ease-out; }
+  .glass-btn svg { width: 1.125rem; height: 1.125rem; }
+  .glass-btn.spin svg { animation: spin 0.8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .large-title { font-size: 2.125rem; line-height: 1.12; font-weight: 700; letter-spacing: -0.015em; margin: 0.25rem 0 0.125rem; }
+  .subtitle { color: var(--label-2); font-size: 0.9375rem; margin: 0 0 1.25rem; min-height: 1.3em; font-variant-numeric: tabular-nums; }
+
+  /* ---------- Lock screen (iPhone passcode) ---------- */
+  #lock {
+    position: fixed; inset: 0; z-index: 20; overflow-y: auto; color: #fff;
+    background:
+      radial-gradient(120% 80% at 15% 0%, #2c3a7a 0%, transparent 60%),
+      radial-gradient(100% 70% at 100% 100%, #4b2a63 0%, transparent 60%),
+      #0b0b16;
     padding: env(safe-area-inset-top) 16px env(safe-area-inset-bottom);
   }
-  .wrap { max-width: 560px; margin: 0 auto; }
-
-  /* Lock screen */
-  #lock { min-height: 100dvh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 28px; padding-bottom: 10vh; }
-  .logo {
-    width: 64px; height: 64px; border-radius: 20px;
-    background: linear-gradient(135deg, var(--accent), var(--accent-2));
-    display: grid; place-items: center; box-shadow: 0 10px 40px -10px var(--accent);
+  .lock-inner { margin: auto; display: flex; flex-direction: column; align-items: center; padding: 6vh 0 4vh; }
+  .lock-icon { width: 1.5rem; height: 1.5rem; opacity: 0.9; margin-bottom: 0.875rem; }
+  .lock-title { font-size: 1.25rem; font-weight: 400; letter-spacing: 0.005em; margin: 0 0 1.375rem; }
+  .dots { display: flex; gap: 1.5rem; margin-bottom: 0.75rem; will-change: transform; }
+  .dot { width: 0.8125rem; height: 0.8125rem; border-radius: 50%; border: 1.25px solid #fff; transition: background 0.08s ease-out; }
+  .dot.on { background: #fff; }
+  .dots.error .dot { border-color: #ff6961; }
+  .dots.error .dot.on { background: #ff6961; }
+  .lock-hint { min-height: 1.25rem; font-size: 0.875rem; color: rgba(255, 255, 255, 0.7); margin: 0 0 2.25rem; text-align: center; letter-spacing: 0.01em; }
+  .lock-hint.err { color: #ff6961; }
+  .pad { display: grid; grid-template-columns: repeat(3, var(--key)); gap: 0.875rem 1.25rem; --key: min(4.875rem, 22vw); }
+  .key {
+    width: var(--key); height: var(--key); border-radius: 50%; border: 0; padding: 0; cursor: pointer; color: #fff;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    background: rgba(255, 255, 255, 0.13);
+    -webkit-backdrop-filter: blur(24px) saturate(160%); backdrop-filter: blur(24px) saturate(160%);
+    transition: background 0.4s ease-out;     /* highlight fades out slowly on release */
+    touch-action: manipulation; user-select: none; -webkit-user-select: none;
   }
-  .logo svg { width: 32px; height: 32px; }
-  h1 { font-size: 22px; font-weight: 650; margin: 0; letter-spacing: -0.01em; }
-  .hint { color: var(--muted); font-size: 14px; margin: -18px 0 0; min-height: 20px; text-align: center; }
-  .hint.err { color: var(--danger); }
-  .dots { display: flex; gap: 14px; }
-  .dot { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--border); transition: background .15s, border-color .15s; }
-  .dot.on { background: var(--text); border-color: var(--text); }
-  .dots.shake { animation: shake .4s; }
-  @keyframes shake { 20%,60% { transform: translateX(-8px); } 40%,80% { transform: translateX(8px); } }
-  .pad { display: grid; grid-template-columns: repeat(3, 76px); gap: 14px; }
-  .pad button {
-    height: 76px; border-radius: 50%; border: 0; background: var(--surface-2); color: var(--text);
-    font-family: inherit; font-size: 28px; font-weight: 400; line-height: 1; cursor: pointer; transition: background .1s, transform .1s;
-  }
-  .pad button:active { background: var(--border); transform: scale(.95); }
-  .pad button.ghost { background: transparent; font-size: 15px; color: var(--muted); }
-  .pad button:disabled { opacity: .4; }
+  .key.pressed { background: rgba(255, 255, 255, 0.42); transition: none; }  /* instant on touch-down */
+  .key .digit { font-size: 2.125rem; font-weight: 300; line-height: 1; letter-spacing: 0; }
+  .key .letters { font-size: 0.625rem; font-weight: 600; letter-spacing: 0.16em; margin-top: 0.125rem; min-height: 0.75rem; padding-left: 0.16em; }
+  .key.text { background: none; -webkit-backdrop-filter: none; backdrop-filter: none; font-size: 1.0625rem; }
+  .key.text.pressed { opacity: 0.5; }
+  .key.hidden { visibility: hidden; }
 
-  /* Feed */
-  #feed { display: none; padding-bottom: 32px; }
-  header {
-    position: sticky; top: 0; z-index: 2; display: flex; align-items: center; justify-content: space-between;
-    padding: 16px 0 12px; background: linear-gradient(var(--bg) 70%, transparent);
-  }
-  header h1 { font-size: 26px; }
-  .status { color: var(--muted); font-size: 13px; }
-  .icon-btn { background: var(--surface-2); border: 0; color: var(--text); width: 38px; height: 38px; border-radius: 12px; display: grid; place-items: center; cursor: pointer; }
-  .icon-btn svg { width: 18px; height: 18px; }
-  .icon-btn.spin svg { animation: spin .8s linear infinite; }
-  @keyframes spin { to { transform: rotate(360deg); } }
-  .actions { display: flex; gap: 8px; }
-
+  /* ---------- Feed ---------- */
   .card {
-    background: var(--surface); border: 1px solid var(--border); border-radius: 18px;
-    padding: 16px 18px; margin-bottom: 12px; animation: in .3s ease both;
+    background: var(--cell); border-radius: 1rem; padding: 0.875rem 1rem 0.75rem; margin-bottom: 0.625rem; box-shadow: var(--shadow);
   }
-  @keyframes in { from { opacity: 0; transform: translateY(6px); } }
-  .card.latest {
-    border-color: transparent; padding: 20px;
-    background: linear-gradient(var(--surface), var(--surface)) padding-box,
-                linear-gradient(135deg, var(--accent), var(--accent-2)) border-box;
-    border: 1.5px solid transparent;
+  .card.enter { animation: enter 0.45s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+  @keyframes enter { from { opacity: 0; transform: translateY(0.5rem) scale(0.98); } }
+  .card .eyebrow { color: var(--tint); font-size: 0.8125rem; font-weight: 600; letter-spacing: 0.01em; margin-bottom: 0.25rem; }
+  .card .text { margin: 0; font-size: 1.0625rem; line-height: 1.38; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .card.latest { padding: 1rem 1.125rem 0.875rem; }
+  .card.latest .text { font-size: 1.375rem; line-height: 1.25; font-weight: 600; letter-spacing: -0.01em; }
+  .card .meta { display: flex; justify-content: space-between; gap: 0.75rem; margin-top: 0.5rem; color: var(--label-2); font-size: 0.8125rem; letter-spacing: 0.01em; font-variant-numeric: tabular-nums; }
+  .empty { text-align: center; padding: 18vh 1rem 0; color: var(--label-2); }
+  .empty svg { width: 3rem; height: 3rem; color: var(--label-3); }
+  .empty h2 { color: var(--label); font-size: 1.25rem; font-weight: 600; margin: 0.75rem 0 0.25rem; }
+  .empty p { margin: 0; }
+
+  /* ---------- Admin: inset grouped lists (Settings-style) ---------- */
+  .group-header { color: var(--label-2); font-size: 0.8125rem; font-weight: 400; text-transform: uppercase; letter-spacing: 0.02em; margin: 1.5rem 1rem 0.4375rem; }
+  .group { background: var(--cell); border-radius: 0.625rem; overflow: hidden; box-shadow: var(--shadow); }
+  .group-footer { color: var(--label-2); font-size: 0.8125rem; letter-spacing: 0.01em; margin: 0.4375rem 1rem 0; }
+  .footer-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; }
+  .cell {
+    position: relative; display: flex; align-items: center; gap: 0.75rem; min-height: 2.75rem; padding: 0.6875rem 1rem;
+    width: 100%; background: none; border: 0; text-align: left;
   }
-  .card .text { white-space: pre-wrap; word-wrap: break-word; }
-  .card.latest .text { font-size: 19px; font-weight: 500; }
-  .meta { display: flex; justify-content: space-between; color: var(--muted); font-size: 12.5px; margin-top: 10px; }
-  .badge { color: var(--accent); font-weight: 600; letter-spacing: .04em; text-transform: uppercase; font-size: 11px; }
-  .empty { text-align: center; color: var(--muted); padding: 60px 0; }
+  /* inset separators, like iOS */
+  .group > * + *::before, #rcptList > * + *::before, #adminList > * + *::before {
+    content: ""; position: absolute; top: 0; left: 1rem; right: 0; height: 0.5px; background: var(--sep); z-index: 1;
+  }
+  #rcptList > *, #adminList > * { position: relative; }
+  .cell-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .cell .title { font-size: 1.0625rem; letter-spacing: -0.005em; }
+  .cell .detail { color: var(--label-2); font-size: 0.8125rem; letter-spacing: 0.01em; margin-top: 0.0625rem; }
+  .cell .value { margin-left: auto; color: var(--label-2); font-size: 1.0625rem; font-variant-numeric: tabular-nums; }
+  .cell.action { color: var(--tint); font-size: 1.0625rem; cursor: pointer; transition: background 0.3s ease-out; }
+  .cell.action:active, label.cell:active { background: var(--fill); transition: none; }
+  .cell.action:disabled { color: var(--label-3); }
+  label.cell { cursor: pointer; transition: background 0.3s ease-out; }
 
-
-  /* Admin */
-  #admin { display: none; padding-bottom: 40px; }
-  .panel { background: var(--surface); border: 1px solid var(--border); border-radius: 18px; padding: 16px; margin-bottom: 14px; }
-  .panel h2 { font-size: 13px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; margin: 0 0 12px; }
   textarea {
-    width: 100%; min-height: 96px; resize: vertical; border-radius: 12px; border: 1px solid var(--border);
-    background: var(--bg); color: var(--text); font: inherit; padding: 12px; outline: none;
+    display: block; width: 100%; min-height: 6.5rem; resize: vertical; border: 0; outline: none;
+    background: transparent; color: var(--label); font: inherit; font-size: 1.0625rem; line-height: 1.38; padding: 0.75rem 1rem;
   }
-  textarea:focus { border-color: var(--accent); }
-  .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-  .row + .row { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border); }
-  .row .label { font-weight: 500; }
-  .row .sub { color: var(--muted); font-size: 13px; }
-  .btn {
-    border: 0; border-radius: 12px; padding: 10px 16px; font: inherit; font-weight: 600; cursor: pointer;
-    background: linear-gradient(135deg, var(--accent), var(--accent-2)); color: #fff;
+  textarea::placeholder, input::placeholder { color: var(--label-3); }
+  .compose-foot { justify-content: space-between; }
+  .count { color: var(--label-2); font-size: 0.8125rem; font-variant-numeric: tabular-nums; }
+  .pill {
+    border: 0; border-radius: 999px; padding: 0.4375rem 1rem; font-size: 0.9375rem; font-weight: 600; cursor: pointer;
+    background: var(--tint); color: #fff; transition: transform 0.25s ease-out, opacity 0.2s;
   }
-  .btn.secondary { background: var(--surface-2); color: var(--text); font-weight: 500; }
-  .btn.danger { background: transparent; color: var(--danger); padding: 6px 8px; font-weight: 500; font-size: 14px; }
-  .btn:disabled { opacity: .5; }
-  .compose-foot { display: flex; justify-content: space-between; align-items: center; margin-top: 10px; color: var(--muted); font-size: 13px; }
-  .switch { position: relative; width: 51px; height: 31px; flex: none; }
-  .switch input { opacity: 0; width: 0; height: 0; position: absolute; }
-  .switch span { position: absolute; inset: 0; border-radius: 31px; background: var(--border); transition: background .2s; cursor: pointer; }
-  .switch span::after { content: ""; position: absolute; top: 2px; left: 2px; width: 27px; height: 27px; border-radius: 50%; background: #fff; transition: transform .2s; }
-  .switch input:checked + span { background: #34c759; }
-  .switch input:checked + span::after { transform: translateX(20px); }
-  .acard { padding: 12px 0; }
-  .acard + .acard { border-top: 1px solid var(--border); }
-  .acard .text { white-space: pre-wrap; word-wrap: break-word; }
-  .acard .meta { margin-top: 6px; align-items: center; }
-  .panel > .sub { color: var(--muted); font-size: 13px; }
-  .rcpt { display: grid; grid-template-columns: 28px 1fr 1.3fr 32px; gap: 8px; align-items: center; }
-  .rcpt + .rcpt { margin-top: 8px; }
-  .rcpt .num { color: var(--muted); font-weight: 600; text-align: center; font-variant-numeric: tabular-nums; }
+  .pill:active { transform: scale(0.95); transition: transform 0.08s ease-out; }
+  .pill:disabled { opacity: 0.35; cursor: default; transform: none; }
+
+  /* iOS switch */
+  .switch { position: relative; flex: none; width: 3.1875rem; height: 1.9375rem; }
+  .switch input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
+  .switch .track { position: absolute; inset: 0; border-radius: 999px; background: var(--fill-press); transition: background 0.25s ease-out; pointer-events: none; }
+  .switch .knob {
+    position: absolute; top: 0.125rem; left: 0.125rem; width: 1.6875rem; height: 1.6875rem; border-radius: 50%; background: #fff; pointer-events: none;
+    box-shadow: 0 3px 8px rgba(0, 0, 0, 0.15), 0 1px 1px rgba(0, 0, 0, 0.16);
+    transition: transform 0.32s cubic-bezier(0.3, 1.3, 0.5, 1);
+  }
+  .switch input:checked ~ .track { background: var(--green); }
+  .switch input:checked ~ .knob { transform: translateX(1.25rem); }
+  .switch input:disabled ~ .track { opacity: 0.6; }
+
+  /* Recipients editor */
+  .rcpt { display: flex; align-items: center; gap: 0.625rem; padding: 0.375rem 1rem 0.375rem 0.75rem; min-height: 2.75rem; }
+  .minus {
+    flex: none; width: 1.375rem; height: 1.375rem; border-radius: 50%; border: 0; padding: 0; cursor: pointer;
+    background: var(--red); display: grid; place-items: center;
+  }
+  .minus::after { content: ""; width: 0.625rem; height: 2px; border-radius: 1px; background: #fff; }
+  .rcpt .num { flex: none; width: 1.25rem; color: var(--label-2); font-variant-numeric: tabular-nums; text-align: center; }
   .rcpt input {
-    width: 100%; min-width: 0; border-radius: 10px; border: 1px solid var(--border); background: var(--bg);
-    color: var(--text); font: inherit; font-size: 15px; padding: 9px 10px; outline: none;
+    min-width: 0; border: 0; outline: none; background: transparent; color: var(--label);
+    font: inherit; font-size: 1.0625rem; padding: 0.375rem 0;
   }
-  .rcpt input:focus { border-color: var(--accent); }
-  .rcpt input.bad { border-color: var(--danger); }
-  .rcpt .x { background: none; border: 0; color: var(--muted); font-size: 20px; cursor: pointer; padding: 0; }
-  .rcpt-foot { display: flex; justify-content: space-between; margin-top: 12px; gap: 8px; }
+  .rcpt .name { flex: 1 1 40%; }
+  .rcpt .cid { flex: 1 1 60%; text-align: right; font-variant-numeric: tabular-nums; color: var(--label-2); }
+  .rcpt .cid.bad { color: var(--red); }
+  .add-icon { width: 1.375rem; height: 1.375rem; border-radius: 50%; background: var(--green); display: grid; place-items: center; flex: none; }
+  .add-icon::before { content: "+"; color: #fff; font-weight: 600; font-size: 1.125rem; line-height: 1; margin-top: -1px; }
+
+  /* Swipe-to-delete rows */
+  .swipe { position: relative; overflow: hidden; }
+  .swipe-delete {
+    position: absolute; top: 0; right: 0; bottom: 0; width: 5.5rem; border: 0; cursor: pointer;
+    background: var(--red); color: #fff; font-size: 1.0625rem;
+  }
+  .swipe-front { position: relative; background: var(--cell); padding: 0.6875rem 1rem; touch-action: pan-y; will-change: transform; }
+  .swipe-front .text { margin: 0; font-size: 1.0625rem; line-height: 1.35; white-space: pre-wrap; overflow-wrap: anywhere;
+    display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+  .swipe-front .meta { color: var(--label-2); font-size: 0.8125rem; margin-top: 0.1875rem; letter-spacing: 0.01em; font-variant-numeric: tabular-nums; }
+  .list-empty { padding: 0.6875rem 1rem; color: var(--label-2); }
+
+  /* Toast: a glass pill that materializes */
   .toast {
-    position: fixed; left: 50%; bottom: calc(24px + env(safe-area-inset-bottom)); transform: translateX(-50%) translateY(120px);
-    background: var(--surface-2); border: 1px solid var(--border); color: var(--text); padding: 10px 16px; border-radius: 14px;
-    font-size: 14px; transition: transform .25s; z-index: 10; max-width: calc(100% - 32px);
+    position: fixed; left: 50%; bottom: calc(1.5rem + env(safe-area-inset-bottom)); z-index: 30;
+    padding: 0.625rem 1.125rem; border-radius: 999px; font-size: 0.9375rem; font-weight: 500; letter-spacing: 0.005em;
+    background: var(--glass); color: var(--label); box-shadow: inset 0 0.5px 0 var(--glass-edge), 0 8px 24px rgba(0, 0, 0, 0.18);
+    -webkit-backdrop-filter: blur(20px) saturate(180%); backdrop-filter: blur(20px) saturate(180%);
+    opacity: 0; pointer-events: none; transform: translateX(-50%); white-space: nowrap; max-width: calc(100% - 2rem);
   }
-  .toast.show { transform: translateX(-50%) translateY(0); }
-  .toast.err { color: var(--danger); }
+  .toast.err { color: var(--red); }
+
+  /* ---------- Accessibility preferences ---------- */
+  @media (prefers-reduced-transparency: reduce) {
+    .nav::before { background: var(--bg); -webkit-backdrop-filter: none; backdrop-filter: none; }
+    .glass-btn, .toast { background: var(--cell); -webkit-backdrop-filter: none; backdrop-filter: none; }
+    .key { background: rgba(255, 255, 255, 0.2); -webkit-backdrop-filter: none; backdrop-filter: none; }
+  }
+  @media (prefers-contrast: more) {
+    .glass-btn, .toast, .group, .card { border: 1px solid var(--label-3); }
+    .key { border: 1px solid rgba(255, 255, 255, 0.6); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .card.enter { animation: fade 0.2s ease both; }
+    @keyframes fade { from { opacity: 0; } }
+    .glass-btn.spin svg { animation: none; }
+    .switch .knob { transition: transform 0.15s ease; }
+  }
 </style>
 </head>
 <body>
-<div class="wrap">
-  <section id="lock">
-    <div class="logo"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="3"/><path d="M9 6V3h6v3M9 18v3h6v-3M12 10v2l1.5 1.5"/></svg></div>
-    <h1>Watch Cards</h1>
-    <p class="hint" id="hint">Enter passcode</p>
-    <div class="dots" id="dots"></div>
+
+<!-- Lock -->
+<section id="lock" class="screen" aria-label="Passcode">
+  <div class="lock-inner">
+    <svg class="lock-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><rect x="5" y="10.5" width="14" height="10" rx="2.5"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/></svg>
+    <h1 class="lock-title">Enter Passcode</h1>
+    <div class="dots" id="dots" aria-hidden="true"></div>
+    <p class="lock-hint" id="hint" aria-live="polite"></p>
     <div class="pad" id="pad"></div>
-  </section>
+  </div>
+</section>
 
-  <section id="feed">
-    <header>
-      <div><h1>Watch Cards</h1><div class="status" id="status"></div></div>
-      <div class="actions">
-        <button class="icon-btn" id="refresh" aria-label="Refresh"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v4h-4"/></svg></button>
-        <button class="icon-btn" id="lockBtn" aria-label="Lock"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg></button>
-      </div>
-    </header>
-    <div id="list"></div>
-  </section>
-
-  <section id="admin">
-    <header>
-      <div><h1>Admin</h1><div class="status" id="adminStatus"></div></div>
-      <div class="actions">
-        <button class="icon-btn" id="adminRefresh" aria-label="Refresh"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v4h-4"/></svg></button>
-        <button class="icon-btn" id="adminExit" aria-label="Lock"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg></button>
-      </div>
-    </header>
-
-    <div class="panel">
-      <h2>New card</h2>
-      <textarea id="compose" maxlength="1000" placeholder="Write a card…"></textarea>
-      <div class="compose-foot"><span id="count">0 / 1000</span><button class="btn" id="send">Post card</button></div>
-    </div>
-
-    <div class="panel">
-      <h2>Settings</h2>
-      <div class="row"><div><div class="label">Feed page</div><div class="sub">Friends can open the feed with the passcode</div></div>
-        <label class="switch"><input type="checkbox" data-key="feed_enabled"><span></span></label></div>
-      <div class="row"><div><div class="label">Telegram pings</div><div class="sub">Message everyone on each new card</div></div>
-        <label class="switch"><input type="checkbox" data-key="telegram_enabled"><span></span></label></div>
-      <div class="row"><div><div class="label">Only me</div><div class="sub">Ping only #1 below, not everyone</div></div>
-        <label class="switch"><input type="checkbox" data-key="telegram_only_me"><span></span></label></div>
-      <div class="row"><div><div class="label">Card text in Telegram</div><div class="sub">Include the card's text, not just its number</div></div>
-        <label class="switch"><input type="checkbox" data-key="telegram_include_text"><span></span></label></div>
-    </div>
-
-    <div class="panel">
-      <h2>Telegram recipients</h2>
-      <div class="sub" style="margin:-4px 0 12px">#1 is you. Each person must have tapped Start in the bot.</div>
-      <div id="rcptList"></div>
-      <div class="rcpt-foot">
-        <button class="btn secondary" id="rcptAdd">+ Add person</button>
-        <button class="btn" id="rcptSave">Save</button>
+<!-- Feed -->
+<section id="feed" class="screen page">
+  <div class="nav">
+    <div class="nav-bar">
+      <span class="nav-title">Watch Cards</span>
+      <div class="nav-actions">
+        <button class="glass-btn" id="refresh" aria-label="Refresh"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v4h-4"/></svg></button>
+        <button class="glass-btn" id="lockBtn" aria-label="Lock"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><rect x="5" y="11" width="14" height="10" rx="2.5"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg></button>
       </div>
     </div>
+  </div>
+  <h1 class="large-title">Watch Cards</h1>
+  <p class="subtitle" id="status"></p>
+  <div id="list"></div>
+</section>
 
-    <div class="panel">
-      <h2>Security</h2>
-      <div class="row"><div><div class="label">Wrong codes</div><div class="sub" id="feedFails"></div></div>
-        <button class="btn secondary" id="resetLockout">Reset counter</button></div>
+<!-- Admin -->
+<section id="admin" class="screen page">
+  <div class="nav">
+    <div class="nav-bar">
+      <span class="nav-title">Admin</span>
+      <div class="nav-actions">
+        <button class="glass-btn" id="adminRefresh" aria-label="Refresh"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v4h-4"/></svg></button>
+        <button class="glass-btn" id="adminExit" aria-label="Lock"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><rect x="5" y="11" width="14" height="10" rx="2.5"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg></button>
+      </div>
     </div>
+  </div>
+  <h1 class="large-title">Admin</h1>
+  <p class="subtitle" id="adminStatus"></p>
 
-    <div class="panel">
-      <h2 id="cardsTitle">Cards</h2>
-      <div id="adminList"></div>
-    </div>
-  </section>
-</div>
-<div class="toast" id="toast"></div>
+  <h2 class="group-header">New Card</h2>
+  <div class="group">
+    <textarea id="compose" maxlength="1000" placeholder="Write a card…" aria-label="New card text"></textarea>
+    <div class="cell compose-foot"><span class="count" id="count">0 / 1000</span><button class="pill" id="send" disabled>Post</button></div>
+  </div>
+
+  <h2 class="group-header">Notifications</h2>
+  <div class="group">
+    <label class="cell"><span class="cell-text"><span class="title">Feed Page</span><span class="detail">Friends can open the feed with their code</span></span>
+      <span class="switch"><input type="checkbox" role="switch" data-key="feed_enabled"><span class="track"></span><span class="knob"></span></span></label>
+    <label class="cell"><span class="cell-text"><span class="title">Telegram Pings</span><span class="detail">Message on every new card</span></span>
+      <span class="switch"><input type="checkbox" role="switch" data-key="telegram_enabled"><span class="track"></span><span class="knob"></span></span></label>
+    <label class="cell"><span class="cell-text"><span class="title">Only Me</span><span class="detail">Ping only #1 below, not everyone</span></span>
+      <span class="switch"><input type="checkbox" role="switch" data-key="telegram_only_me"><span class="track"></span><span class="knob"></span></span></label>
+    <label class="cell"><span class="cell-text"><span class="title">Card Text in Telegram</span><span class="detail">Include the text, not just the number</span></span>
+      <span class="switch"><input type="checkbox" role="switch" data-key="telegram_include_text"><span class="track"></span><span class="knob"></span></span></label>
+  </div>
+
+  <h2 class="group-header">Telegram Recipients</h2>
+  <div class="group">
+    <div id="rcptList"></div>
+    <button class="cell action" id="rcptAdd"><span class="add-icon" aria-hidden="true"></span>Add Person</button>
+  </div>
+  <div class="group-footer footer-row">
+    <span>#1 is you. Everyone needs to tap Start in the bot first.</span>
+    <button class="pill" id="rcptSave" disabled>Save</button>
+  </div>
+
+  <h2 class="group-header">Security</h2>
+  <div class="group">
+    <div class="cell"><span class="title">Wrong Codes</span><span class="value" id="feedFails"></span></div>
+    <button class="cell action" id="resetLockout">Reset Counter</button>
+  </div>
+  <p class="group-footer">10 wrong codes in an hour locks the keypad for everyone, including you.</p>
+
+  <h2 class="group-header" id="cardsTitle">Cards</h2>
+  <div class="group" id="adminList"></div>
+  <p class="group-footer">Swipe left on a card to delete it.</p>
+</section>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
 
 <script>
 (() => {
+  // ================= Motion: springs (Apple's damping ratio + response) =================
+  const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
+  document.addEventListener("touchstart", () => {}, { passive: true }); // lets :active work on iOS Safari
+
+  // Animates from the current value with the current velocity, so it can be interrupted and re-targeted.
+  function spring({ from, to, velocity = 0, damping = 1, response = 0.35, precision = 0.01, onUpdate, onDone }) {
+    let raf = 0;
+    const handle = { value: from, velocity, stop() { cancelAnimationFrame(raf); } };
+    if (reducedMotion.matches) {
+      handle.value = to; handle.velocity = 0; onUpdate(to); onDone && onDone();
+      return handle;
+    }
+    const k = Math.pow((2 * Math.PI) / response, 2); // stiffness (mass = 1)
+    const c = (4 * Math.PI * damping) / response;     // damping coefficient
+    let last = performance.now();
+    const step = (now) => {
+      const dt = Math.min((now - last) / 1000, 0.064); last = now;
+      const n = Math.max(1, Math.ceil(dt / 0.004)), h = dt / n;
+      for (let i = 0; i < n; i++) {
+        const a = -k * (handle.value - to) - c * handle.velocity;
+        handle.velocity += a * h; handle.value += handle.velocity * h;
+      }
+      if (Math.abs(handle.value - to) < precision && Math.abs(handle.velocity) < precision * 10) {
+        handle.value = to; handle.velocity = 0; onUpdate(to); onDone && onDone(); return;
+      }
+      onUpdate(handle.value);
+      raf = requestAnimationFrame(step);
+    };
+    raf = requestAnimationFrame(step);
+    return handle;
+  }
+  // Progressive resistance past a boundary.
+  const rubberband = (overshoot, dim, c = 0.55) => (overshoot * dim * c) / (dim + c * Math.abs(overshoot));
+  // Where a flick will come to rest (Apple's projection, scroll-like deceleration).
+  const project = (v, d = 0.998) => ((v / 1000) * d) / (1 - d);
+
+  // ================= Small helpers =================
+  const $ = (id) => document.getElementById(id);
+  const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
   const KEY = "watchcards.passcode";
   const store = {
     get() { try { return localStorage.getItem(KEY); } catch { return null; } },
     set(v) { try { localStorage.setItem(KEY, v); } catch {} },
     clear() { try { localStorage.removeItem(KEY); } catch {} },
   };
-  const $ = (id) => document.getElementById(id);
-  let code = "", passcode = null, timer = null, busy = false;
-  let adminCode = null;         // admin code lives in memory only, never in storage
-  const CODE_LEN = 4;
-
-  // The server decides what a code unlocks: the feed code opens the feed, the admin code opens the admin panel.
-  function resetKeypad() {
-    code = "";
-    $("dots").replaceChildren(...Array.from({ length: CODE_LEN }, () => Object.assign(document.createElement("span"), { className: "dot" })));
-    hint("Enter passcode");
-  }
-
-  // Keypad
-  const keys = ["1","2","3","4","5","6","7","8","9","","0","⌫"];
-  for (const k of keys) {
-    const b = document.createElement("button");
-    b.textContent = k;
-    if (k === "") { b.className = "ghost"; b.disabled = true; b.style.visibility = "hidden"; }
-    if (k === "⌫") { b.className = "ghost"; b.setAttribute("aria-label", "Delete"); }
-    b.addEventListener("click", () => press(k));
-    $("pad").appendChild(b);
-  }
-  resetKeypad();
-  document.addEventListener("keydown", (e) => {
-    if ($("lock").style.display === "none") return;
-    if (/^\d$/.test(e.key)) press(e.key);
-    else if (e.key === "Backspace") press("⌫");
-  });
-
-  function drawDots() {
-    [...$("dots").children].forEach((d, i) => d.classList.toggle("on", i < code.length));
-  }
-  function hint(msg, err) { $("hint").textContent = msg; $("hint").classList.toggle("err", !!err); }
-
-  async function press(k) {
-    if (busy) return;
-    if (k === "⌫") code = code.slice(0, -1);
-    else if (code.length < CODE_LEN) code += k;
-    drawDots();
-    if (code.length === CODE_LEN) {
-      busy = true;
-      hint("Checking…");
-      const r = await unlock(code);
-      busy = false;
-      if (r === "feed") { store.set(code); showFeed(); }
-      else if (r === "admin") showAdmin();
-      else {
-        $("dots").classList.add("shake");
-        setTimeout(() => $("dots").classList.remove("shake"), 400);
-        hint(r === "limit" ? "Too many attempts. Try again later." : r === "wrong" ? "Wrong code"
-          : r === "paused" ? "The feed is paused right now." : "Can't reach server", true);
-        code = ""; drawDots();
-      }
-    }
-  }
-
-  // Data
-  async function unlock(pc) {
-    try {
-      const res = await fetch("/unlock", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ passcode: pc }),
-        cache: "no-store",
-      });
-      if (res.status === 401) return "wrong";
-      if (res.status === 429) return "limit";
-      if (res.status === 403) return "paused";
-      if (!res.ok) return "error";
-      const data = await res.json();
-      if (data.role === "admin") { adminCode = pc; adminState = data; renderAdmin(); return "admin"; }
-      passcode = pc;
-      render(data.cards);
-      return "feed";
-    } catch { return "error"; }
-  }
-
-  async function load(pc) {
-    try {
-      const res = await fetch("/cards", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ passcode: pc }),
-        cache: "no-store",
-      });
-      if (res.status === 401) return "wrong";
-      if (res.status === 429) return "limit";
-      if (res.status === 403) return "paused";
-      if (!res.ok) return "error";
-      const { cards } = await res.json();
-      passcode = pc;
-      render(cards);
-      return "ok";
-    } catch { return "error"; }
-  }
-
   function parseDate(s) {
     return new Date(String(s).replace(" ", "T").replace(/(\.\d{3})\d+/, "$1").replace(/([+-]\d{2})$/, "$1:00"));
   }
   function ago(d) {
     const s = Math.round((Date.now() - d) / 1000);
-    if (s < 45) return "just now";
+    if (s < 45) return "Just now";
     const m = Math.round(s / 60); if (m < 60) return m + " min ago";
     const h = Math.round(m / 60); if (h < 24) return h + " h ago";
-    const days = Math.round(h / 24); if (days < 7) return days + " d ago";
+    const days = Math.round(h / 24); if (days === 1) return "Yesterday";
+    if (days < 7) return days + " days ago";
     return d.toLocaleDateString(undefined, { day: "numeric", month: "short" });
   }
-  function clock(d) { return d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" }); }
+  const clock = (d) => d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
 
-  function render(cards) {
-    const list = $("list");
-    list.replaceChildren();
-    if (!cards.length) {
-      const e = document.createElement("div"); e.className = "empty"; e.textContent = "No cards yet.";
-      list.appendChild(e);
+  // ================= Screens =================
+  let current = null, screenAnim = null, prevScreen = null;
+  function finishScreen() {
+    if (!prevScreen) return;
+    prevScreen.style.display = "none";
+    prevScreen.style.transform = prevScreen.style.opacity = "";
+    $(current).style.transform = $(current).style.opacity = "";
+    prevScreen = null;
+  }
+  function show(name) {
+    if (current === name) return;
+    screenAnim && screenAnim.stop(); finishScreen();
+    const next = $(name), prev = current && $(current);
+    next.style.display = name === "lock" ? "flex" : "block";
+    if (name !== "lock") window.scrollTo(0, 0);
+    current = name;
+    updateNav();
+    if (!prev) return;
+    prevScreen = prev;
+    if (reducedMotion.matches) {           // cross-fade instead of scale
+      next.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 200, easing: "ease" });
+      finishScreen(); return;
     }
-    cards.forEach((c, i) => {
-      const d = parseDate(c.created_at);
-      const el = document.createElement("article");
-      el.className = "card" + (i === 0 ? " latest" : "");
-      el.style.animationDelay = Math.min(i, 10) * 25 + "ms";
-      const text = document.createElement("div"); text.className = "text"; text.textContent = c.text;
-      const meta = document.createElement("div"); meta.className = "meta";
-      const left = document.createElement("span");
-      left.innerHTML = i === 0 ? '<span class="badge">Latest</span>' : "";
-      if (i !== 0) left.textContent = "#" + c.id;
-      const right = document.createElement("span"); right.textContent = ago(d) + " · " + clock(d);
-      meta.append(left, right);
-      el.append(text, meta);
-      list.appendChild(el);
+    // The lock screen recedes forward as content settles in; locking plays the same path backwards.
+    const toLock = name === "lock";
+    screenAnim = spring({
+      from: 0, to: 1, damping: 1, response: 0.42, precision: 0.001,
+      onUpdate: (p) => {
+        next.style.opacity = p; prev.style.opacity = 1 - p;
+        next.style.transform = `scale(${toLock ? 1.06 - 0.06 * p : 0.97 + 0.03 * p})`;
+        prev.style.transform = `scale(${toLock ? 1 - 0.03 * p : 1 + 0.06 * p})`;
+      },
+      onDone: finishScreen,
     });
-    $("status").textContent = cards.length + (cards.length === 1 ? " card" : " cards") + " · updated " + clock(new Date());
+  }
+
+  // Large title collapses into the translucent nav bar as content scrolls under it.
+  let navRaf = 0;
+  function updateNav() {
+    navRaf = 0;
+    const nav = current && current !== "lock" && document.querySelector(`#${current} .nav`);
+    if (nav) nav.style.setProperty("--p", Math.min(Math.max((window.scrollY - 12) / 28, 0), 1).toFixed(3));
+  }
+  window.addEventListener("scroll", () => { if (!navRaf) navRaf = requestAnimationFrame(updateNav); }, { passive: true });
+
+  // ================= Toast (materializes, then leaves along the same path) =================
+  let toastAnim = null, toastTimer = 0, toastP = 0;
+  function toast(msg, err) {
+    const t = $("toast"); t.textContent = msg; t.classList.toggle("err", !!err);
+    const run = (to) => {
+      toastAnim && toastAnim.stop();
+      toastAnim = spring({ from: toastP, to, damping: 1, response: 0.35, precision: 0.002, onUpdate: (p) => {
+        toastP = p;
+        t.style.opacity = p;
+        t.style.transform = `translateX(-50%) translateY(${(1 - p) * 0.75}rem) scale(${0.94 + 0.06 * p})`;
+        t.style.filter = p > 0.995 ? "" : `blur(${(1 - p) * 6}px)`;
+      } });
+    };
+    run(1);
+    clearTimeout(toastTimer); toastTimer = setTimeout(() => run(0), 2200);
+  }
+
+  // ================= Lock: passcode keypad =================
+  const CODE_LEN = 4;
+  let code = "", passcode = null, adminCode = null, timer = null, busy = false;
+  const LETTERS = { 2: "ABC", 3: "DEF", 4: "GHI", 5: "JKL", 6: "MNO", 7: "PQRS", 8: "TUV", 9: "WXYZ" };
+
+  // Highlight on touch-down (instant), commit on release; dragging off cancels.
+  function pressable(btn, onCommit) {
+    btn.addEventListener("pointerdown", () => btn.classList.add("pressed"));
+    for (const ev of ["pointerup", "pointercancel", "pointerleave"]) btn.addEventListener(ev, () => btn.classList.remove("pressed"));
+    btn.addEventListener("click", onCommit);
+  }
+  for (const k of ["1", "2", "3", "4", "5", "6", "7", "8", "9", "", "0", "del"]) {
+    const b = el("button", "key");
+    if (k === "") { b.classList.add("hidden"); b.disabled = true; b.setAttribute("aria-hidden", "true"); }
+    else if (k === "del") { b.classList.add("text", "hidden"); b.id = "delKey"; b.textContent = "Delete"; }
+    else { b.append(el("span", "digit", k), el("span", "letters", LETTERS[k] || "")); b.setAttribute("aria-label", k); b.dataset.digit = k; }
+    if (k) pressable(b, () => press(k));
+    $("pad").append(b);
+  }
+  document.addEventListener("keydown", (e) => {
+    if (current !== "lock") return;
+    if (/^\d$/.test(e.key)) press(e.key); else if (e.key === "Backspace") press("del");
+  });
+
+  function drawDots() {
+    [...$("dots").children].forEach((d, i) => d.classList.toggle("on", i < code.length));
+    $("delKey").classList.toggle("hidden", code.length === 0);
+  }
+  function hint(msg, err) { $("hint").textContent = msg || ""; $("hint").classList.toggle("err", !!err); }
+  function resetKeypad() {
+    code = "";
+    $("dots").replaceChildren(...Array.from({ length: CODE_LEN }, () => el("span", "dot")));
+    $("dots").classList.remove("error");
+    drawDots();
+  }
+  // Wrong code: an under-damped spring shake, with a haptic on the same frame.
+  let shakeAnim = null;
+  function shake() {
+    const dots = $("dots");
+    dots.classList.add("error");
+    navigator.vibrate && navigator.vibrate(40);
+    shakeAnim && shakeAnim.stop();
+    shakeAnim = spring({ from: 0, to: 0, velocity: 900, damping: 0.18, response: 0.3, precision: 0.2,
+      onUpdate: (x) => { dots.style.transform = `translateX(${x}px)`; } });
+    setTimeout(() => { dots.classList.remove("error"); code = ""; drawDots(); }, 450);
+  }
+
+  async function press(k) {
+    if (busy) return;
+    if (k === "del") code = code.slice(0, -1);
+    else if (code.length < CODE_LEN) code += k;
+    hint("");
+    drawDots();
+    if (code.length < CODE_LEN) return;
+    busy = true;
+    const r = await unlock(code);
+    busy = false;
+    if (r === "feed") { store.set(code); showFeed(); return; }
+    if (r === "admin") { showAdmin(); return; }
+    hint(r === "limit" ? "Too many attempts. Try again later."
+      : r === "wrong" ? "Wrong Passcode"
+      : r === "paused" ? "The feed is paused right now." : "Can't reach the server", true);
+    shake();
+  }
+
+  // ================= API =================
+  async function post(path, body) {
+    try {
+      const res = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), cache: "no-store" });
+      const status = res.status === 401 ? "wrong" : res.status === 429 ? "limit" : res.status === 403 ? "paused" : res.ok ? "ok" : "error";
+      return { status, data: res.ok ? await res.json() : null };
+    } catch { return { status: "error", data: null }; }
+  }
+
+  async function unlock(pc) {
+    const { status, data } = await post("/unlock", { passcode: pc });
+    if (status !== "ok") return status;
+    if (data.role === "admin") { adminCode = pc; adminState = data; renderAdmin(); return "admin"; }
+    passcode = pc; renderFeed(data.cards); return "feed";
+  }
+
+  // ================= Feed =================
+  const seen = new Set();
+  function renderFeed(cards) {
+    const list = $("list");
+    const firstRender = seen.size === 0;
+    if (!cards.length) {
+      const e = el("div", "empty");
+      e.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><rect x="6" y="6" width="12" height="12" rx="3"/><path d="M9 6V3h6v3M9 18v3h6v-3"/></svg>';
+      e.append(el("h2", null, "No Cards Yet"), el("p", null, "New cards from Claude show up here."));
+      list.replaceChildren(e);
+    } else {
+      list.replaceChildren(...cards.map((c, i) => {
+        const d = parseDate(c.created_at);
+        const card = el("article", "card" + (i === 0 ? " latest" : ""));
+        if (!seen.has(c.id)) { card.classList.add("enter"); card.style.animationDelay = (firstRender ? Math.min(i, 8) * 35 : 0) + "ms"; }
+        if (i === 0) card.append(el("div", "eyebrow", "Latest"));
+        const meta = el("div", "meta");
+        meta.append(el("span", null, "#" + c.id), el("span", null, ago(d) + " · " + clock(d)));
+        card.append(el("p", "text", c.text), meta);
+        return card;
+      }));
+    }
+    cards.forEach((c) => seen.add(c.id));
+    $("status").textContent = cards.length + (cards.length === 1 ? " card" : " cards") + " · Updated " + clock(new Date());
   }
 
   async function refresh() {
-    if (!passcode) return;
+    if (!passcode || current !== "feed") return;
     $("refresh").classList.add("spin");
-    const r = await load(passcode);
+    const { status, data } = await post("/cards", { passcode });
     $("refresh").classList.remove("spin");
-    if (r === "wrong") lock("Passcode changed. Enter the new one.");
-    else if (r === "paused") lock("The feed is paused right now.");
-    else if (r !== "ok") $("status").textContent = "Offline · retrying";
+    if (status === "ok") renderFeed(data.cards);
+    else if (status === "wrong") lock("Passcode changed. Enter the new one.");
+    else if (status === "paused") lock("The feed is paused right now.");
+    else $("status").textContent = "Offline · retrying";
   }
 
   function showFeed() {
-    $("lock").style.display = "none";
-    $("feed").style.display = "block";
-    clearInterval(timer);
-    timer = setInterval(refresh, 30000);
+    show("feed");
+    clearInterval(timer); timer = setInterval(refresh, 30000);
   }
+
   function lock(msg) {
     clearInterval(timer);
-    passcode = null; adminCode = null; store.clear();
+    passcode = null; adminCode = null; store.clear(); seen.clear();
+    closeOpenRow();
     resetKeypad();
-    $("feed").style.display = "none";
-    $("admin").style.display = "none";
-    $("lock").style.display = "flex";
-    if (msg) hint(msg, true);
+    hint(msg || "", !!msg);
+    show("lock");
   }
 
-  // ---- Admin ----
+  // ================= Admin =================
   var adminState = null;
-  function toast(msg, err) {
-    const t = $("toast"); t.textContent = msg; t.classList.toggle("err", !!err); t.classList.add("show");
-    clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove("show"), 2200);
-  }
 
   // Every admin request re-sends the code; the server checks it each time.
-  async function adminCall(action, extra, codeOverride) {
-    const pc = codeOverride ?? adminCode;
-    try {
-      const res = await fetch("/admin", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ passcode: pc, action, ...extra }),
-        cache: "no-store",
-      });
-      if (res.status === 401) return "wrong";
-      if (res.status === 429) return "limit";
-      if (!res.ok) return "error";
-      adminCode = pc;
-      adminState = await res.json();
+  async function adminDo(action, extra, okMsg) {
+    const { status, data } = await post("/admin", { passcode: adminCode, action, ...extra });
+    if (status === "ok") {
+      adminState = data;
       if (action === "set_recipients") rcptDirty = false;
       renderAdmin();
-      return "ok";
-    } catch { return "error"; }
-  }
-
-  async function adminDo(action, extra, okMsg) {
-    const r = await adminCall(action, extra);
-    if (r === "ok") { if (okMsg) toast(okMsg); return true; }
-    if (r === "wrong") { lock("Admin code changed."); return false; }
-    toast(r === "limit" ? "Locked: too many wrong codes" : "Something went wrong", true);
+      if (okMsg) toast(okMsg);
+      return true;
+    }
+    if (status === "wrong") { lock("Admin code changed."); return false; }
+    toast(status === "limit" ? "Locked: too many wrong codes" : "Something went wrong", true);
     return false;
   }
 
-  // Recipients editor: rows of name + chat ID, saved together with the Save button.
+  function showAdmin() { clearInterval(timer); show("admin"); }
+
+  function renderAdmin() {
+    const { settings, cards, stats } = adminState;
+    document.querySelectorAll("#admin [data-key]").forEach((i) => { i.checked = !!settings[i.dataset.key]; });
+    const locked = stats.failures_last_hour >= stats.max_failures_per_hour;
+    $("feedFails").textContent = stats.failures_last_hour + " of " + stats.max_failures_per_hour + (locked ? " · Locked" : "");
+    $("adminStatus").textContent = cards.length + (cards.length === 1 ? " card" : " cards") + " · Updated " + clock(new Date());
+    $("cardsTitle").textContent = "Cards (" + cards.length + ")";
+    if (!rcptDirty) renderRecipients(adminState.recipients || []);   // don't wipe unsaved edits
+    renderAdminCards(cards);
+  }
+
+  // ----- Compose -----
+  $("compose").addEventListener("input", () => {
+    $("count").textContent = $("compose").value.length + " / 1000";
+    $("send").disabled = $("compose").value.trim().length === 0;   // validate inline, not on submit
+  });
+  $("send").addEventListener("click", async () => {
+    const text = $("compose").value.trim();
+    if (!text) return;
+    $("send").disabled = true;
+    if (await adminDo("post", { text }, "Card posted")) { $("compose").value = ""; $("count").textContent = "0 / 1000"; }
+    else $("send").disabled = false;
+  });
+
+  // ----- Settings switches -----
+  document.querySelectorAll("#admin [data-key]").forEach((input) => input.addEventListener("change", async () => {
+    input.disabled = true;
+    if (!(await adminDo("set", { key: input.dataset.key, value: input.checked }))) input.checked = !input.checked;
+    input.disabled = false;
+  }));
+  $("resetLockout").addEventListener("click", () => adminDo("reset_lockout", {}, "Counter reset"));
+
+  // ----- Recipients editor -----
   let rcptDirty = false;
-  function rcptRow(r, i) {
-    const row = document.createElement("div"); row.className = "rcpt";
-    const num = document.createElement("div"); num.className = "num"; num.textContent = i + 1;
-    const name = Object.assign(document.createElement("input"), { placeholder: "Name", value: r.name || "", maxLength: 40 });
-    const id = Object.assign(document.createElement("input"), { placeholder: "Chat ID", value: r.chat_id || "", inputMode: "numeric" });
-    name.className = "name"; id.className = "cid";
-    const x = Object.assign(document.createElement("button"), { className: "x", textContent: "×", ariaLabel: "Remove" });
-    x.addEventListener("click", () => { row.remove(); renumber(); rcptDirty = true; });
-    [name, id].forEach((el) => el.addEventListener("input", () => { rcptDirty = true; id.classList.remove("bad"); }));
-    row.append(num, name, id, x);
+  const validId = (v) => /^-?\d{5,20}$/.test(v);
+  function markDirty() { rcptDirty = true; $("rcptSave").disabled = false; }
+  function rcptRow(r) {
+    const row = el("div", "rcpt");
+    const minus = el("button", "minus"); minus.setAttribute("aria-label", "Remove");
+    const name = Object.assign(el("input", "name"), { placeholder: "Name", value: r.name || "", maxLength: 40 });
+    const id = Object.assign(el("input", "cid"), { placeholder: "Chat ID", value: r.chat_id || "", inputMode: "numeric" });
+    name.setAttribute("aria-label", "Name"); id.setAttribute("aria-label", "Chat ID");
+    minus.addEventListener("click", () => { row.remove(); renumber(); markDirty(); });
+    name.addEventListener("input", markDirty);
+    id.addEventListener("input", () => { markDirty(); id.classList.remove("bad"); });
+    id.addEventListener("blur", () => id.classList.toggle("bad", id.value.trim() !== "" && !validId(id.value.trim())));
+    row.append(minus, el("span", "num"), name, id);
     return row;
   }
   function renumber() { [...$("rcptList").children].forEach((row, i) => { row.querySelector(".num").textContent = i + 1; }); }
   function renderRecipients(list) {
     $("rcptList").replaceChildren(...(list.length ? list : [{}]).map(rcptRow));
-    rcptDirty = false;
+    renumber();
+    rcptDirty = false; $("rcptSave").disabled = true;
   }
   $("rcptAdd").addEventListener("click", () => {
-    $("rcptList").append(rcptRow({}, $("rcptList").children.length));
-    rcptDirty = true;
+    $("rcptList").append(rcptRow({})); renumber(); markDirty();
     $("rcptList").lastChild.querySelector(".name").focus();
   });
   $("rcptSave").addEventListener("click", async () => {
-    const rows = [...$("rcptList").children].map((row) => ({
-      name: row.querySelector(".name").value.trim(), chat_id: row.querySelector(".cid").value.trim(), el: row.querySelector(".cid"),
-    })).filter((r) => r.name || r.chat_id);
-    const bad = rows.filter((r) => !/^-?\d{5,20}$/.test(r.chat_id));
+    const rows = [...$("rcptList").children]
+      .map((row) => ({ name: row.querySelector(".name").value.trim(), chat_id: row.querySelector(".cid").value.trim(), el: row.querySelector(".cid") }))
+      .filter((r) => r.name || r.chat_id);
+    const bad = rows.filter((r) => !validId(r.chat_id));
     bad.forEach((r) => r.el.classList.add("bad"));
     if (bad.length) return toast("Chat IDs must be numbers", true);
     $("rcptSave").disabled = true;
-    await adminDo("set_recipients", { recipients: rows.map(({ name, chat_id }) => ({ name, chat_id })) }, "Recipients saved");
-    $("rcptSave").disabled = false;
+    if (!(await adminDo("set_recipients", { recipients: rows.map(({ name, chat_id }) => ({ name, chat_id })) }, "Recipients saved"))) $("rcptSave").disabled = false;
   });
 
-  function renderAdmin() {
-    const { settings, cards, stats } = adminState;
-    // Don't wipe unsaved edits when another admin action refreshes the state.
-    if (!rcptDirty) renderRecipients(adminState.recipients || []);
-    document.querySelectorAll("#admin [data-key]").forEach((el) => { el.checked = !!settings[el.dataset.key]; });
-    $("feedFails").textContent = stats.failures_last_hour + " / " + stats.max_failures_per_hour + " in the last hour"
-      + (stats.failures_last_hour >= stats.max_failures_per_hour ? " · locked" : "");
-    $("cardsTitle").textContent = "Cards (" + cards.length + ")";
-    $("adminStatus").textContent = "updated " + clock(new Date());
+  // ----- Cards with swipe-to-delete (1:1 tracking, momentum projection, velocity hand-off) -----
+  let openRow = null;
+  function closeOpenRow() { if (openRow) openRow.settle(0); openRow = null; }
+  document.addEventListener("pointerdown", (e) => { if (openRow && !openRow.root.contains(e.target)) closeOpenRow(); });
+
+  function swipeRow(content, onDelete) {
+    const root = el("div", "swipe");
+    const del = el("button", "swipe-delete", "Delete");
+    const front = el("div", "swipe-front");
+    front.append(...content);
+    root.append(del, front);
+    const W = 88;
+    let x = 0, anim = null, drag = null, suppressClick = false;
+    const set = (v) => { x = v; front.style.transform = `translateX(${v}px)`; };
+    const row = {
+      root,
+      settle(target, velocity = 0) {
+        anim && anim.stop();
+        const flick = Math.abs(velocity) > 300;   // bounce only when the gesture carried momentum
+        anim = spring({ from: x, to: target, velocity, damping: flick ? 0.82 : 1, response: 0.32, precision: 0.1, onUpdate: set });
+        if (target !== 0) { if (openRow && openRow !== row) openRow.settle(0); openRow = row; }
+        else if (openRow === row) openRow = null;
+      },
+    };
+    front.addEventListener("pointerdown", (e) => {
+      if (e.button) return;
+      if (anim) { anim.stop(); x = anim.value; }   // grab mid-flight from the on-screen position
+      drag = { id: e.pointerId, sx: e.clientX, sy: e.clientY, x0: x, dir: null, hist: [{ x: e.clientX, t: e.timeStamp }] };
+    });
+    front.addEventListener("pointermove", (e) => {
+      if (!drag || e.pointerId !== drag.id) return;
+      const dx = e.clientX - drag.sx, dy = e.clientY - drag.sy;
+      if (!drag.dir) {
+        if (Math.hypot(dx, dy) < 10) return;                  // hysteresis before committing to a direction
+        drag.dir = Math.abs(dx) > Math.abs(dy) ? "x" : "y";
+        if (drag.dir === "y") { drag = null; return; }        // let the page scroll
+        front.setPointerCapture(e.pointerId);
+        if (openRow && openRow !== row) openRow.settle(0);
+      }
+      drag.hist.push({ x: e.clientX, t: e.timeStamp });
+      while (drag.hist.length > 2 && e.timeStamp - drag.hist[0].t > 100) drag.hist.shift();
+      let nx = drag.x0 + dx;
+      if (nx > 0) nx = rubberband(nx, front.offsetWidth);
+      else if (nx < -W) nx = -W - rubberband(-W - nx, front.offsetWidth);
+      set(nx);
+    });
+    const end = (e) => {
+      if (!drag || e.pointerId !== drag.id) return;
+      const moved = drag.dir === "x";
+      const h = drag.hist, a = h[0], b = h[h.length - 1];
+      const v = b.t > a.t ? ((b.x - a.x) / (b.t - a.t)) * 1000 : 0;
+      drag = null;
+      if (!moved) return;
+      suppressClick = true;
+      row.settle(x + project(v) < -W / 2 ? -W : 0, v);         // land where the flick is going
+    };
+    front.addEventListener("pointerup", end);
+    front.addEventListener("pointercancel", end);
+    front.addEventListener("click", () => { if (suppressClick) { suppressClick = false; return; } if (x !== 0) row.settle(0); });
+    del.addEventListener("focus", () => row.settle(-W));       // keyboard users reveal it by tabbing
+    del.addEventListener("click", async () => {
+      del.disabled = true;
+      anim && anim.stop();
+      anim = spring({ from: x, to: -front.offsetWidth, damping: 1, response: 0.3, precision: 1, onUpdate: set });
+      if (!(await onDelete())) { del.disabled = false; row.settle(0); }
+    });
+    return root;
+  }
+
+  function renderAdminCards(cards) {
+    openRow = null;
     const list = $("adminList");
-    list.replaceChildren();
-    if (!cards.length) list.append(Object.assign(document.createElement("div"), { className: "sub", textContent: "No cards yet." }));
-    for (const c of cards) {
+    if (!cards.length) { list.replaceChildren(el("div", "list-empty", "No cards yet.")); return; }
+    list.replaceChildren(...cards.map((c) => {
       const d = parseDate(c.created_at);
-      const el = document.createElement("div"); el.className = "acard";
-      const text = document.createElement("div"); text.className = "text"; text.textContent = c.text;
-      const meta = document.createElement("div"); meta.className = "meta";
-      const info = document.createElement("span"); info.textContent = "#" + c.id + " · " + ago(d) + " · " + clock(d);
-      const del = document.createElement("button"); del.className = "btn danger"; del.textContent = "Delete";
-      del.addEventListener("click", async () => {
-        if (!confirm("Delete card #" + c.id + "?")) return;
-        del.disabled = true;
-        if (!(await adminDo("delete", { id: c.id }, "Card #" + c.id + " deleted"))) del.disabled = false;
-      });
-      meta.append(info, del);
-      el.append(text, meta);
-      list.append(el);
-    }
+      return swipeRow(
+        [el("p", "text", c.text), el("div", "meta", "#" + c.id + " · " + ago(d) + " · " + clock(d))],
+        () => adminDo("delete", { id: c.id }, "Card #" + c.id + " deleted"),
+      );
+    }));
   }
 
-  function showAdmin() {
-    clearInterval(timer);
-    $("lock").style.display = "none";
-    $("feed").style.display = "none";
-    $("admin").style.display = "block";
-    window.scrollTo(0, 0);
-  }
-
-  $("adminExit").addEventListener("click", () => lock());
-  $("adminRefresh").addEventListener("click", () => adminDo("state", {}));
-  $("compose").addEventListener("input", () => { $("count").textContent = $("compose").value.length + " / 1000"; });
-  $("send").addEventListener("click", async () => {
-    const text = $("compose").value.trim();
-    if (!text) return toast("Write something first", true);
-    $("send").disabled = true;
-    if (await adminDo("post", { text }, "Card posted")) { $("compose").value = ""; $("count").textContent = "0 / 1000"; }
-    $("send").disabled = false;
-  });
-  document.querySelectorAll("#admin [data-key]").forEach((el) => el.addEventListener("change", async () => {
-    el.disabled = true;
-    const ok = await adminDo("set", { key: el.dataset.key, value: el.checked }, "Saved");
-    if (!ok) el.checked = !el.checked;
-    el.disabled = false;
-  }));
-  $("resetLockout").addEventListener("click", () => adminDo("reset_lockout", {}, "Counter reset"));
-
+  // ================= Wiring =================
   $("refresh").addEventListener("click", refresh);
   $("lockBtn").addEventListener("click", () => lock());
+  $("adminExit").addEventListener("click", () => lock());
+  $("adminRefresh").addEventListener("click", async () => {
+    $("adminRefresh").classList.add("spin");
+    await adminDo("state", {});
+    $("adminRefresh").classList.remove("spin");
+  });
   document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(); });
 
-  // Auto-unlock with a remembered passcode (still verified by the server).
+  // Start: auto-unlock with a remembered feed code (still verified by the server).
+  resetKeypad();
   const saved = store.get();
-  if (saved) load(saved).then((r) => (r === "ok" ? showFeed() : r === "wrong" ? lock() : (passcode = saved, showFeed(), refresh())));
+  if (!saved) { show("lock"); return; }
+  post("/cards", { passcode: saved }).then(({ status, data }) => {
+    if (status === "ok") { passcode = saved; renderFeed(data.cards); showFeed(); }
+    else if (status === "wrong" || status === "paused") { store.clear(); show("lock"); if (status === "paused") hint("The feed is paused right now.", true); }
+    else { passcode = saved; show("feed"); $("status").textContent = "Offline · retrying"; timer = setInterval(refresh, 30000); }
+  });
 })();
 </script>
 </body>
