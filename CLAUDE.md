@@ -31,8 +31,10 @@ Postgres table public.watch_cards  (project "oliverseydlitz-ai's Project", ref j
 |---|---|
 | `supabase/functions/watch/index.ts` | The whole API + MCP server (one file, no MCP library: hand-written JSON-RPC) |
 | `supabase/migrations/20261012000000_watch_cards.sql` | Table + RLS (already applied) |
+| `supabase/migrations/20261013000000_feed_failures.sql` | Wrong-passcode log for rate limiting (already applied) |
 | `supabase/config.toml` | `verify_jwt = false` for `watch` (the function does its own auth) |
-| `cloudflare/worker.js` | Proxy Worker (~10 lines) |
+| `cloudflare/worker.js` | Serves the feed page at `GET /`, proxies everything else to Supabase |
+| `cloudflare/index.html` | Feed page (passcode keypad + card list), bundled into the Worker as a text module |
 | `cloudflare/wrangler.jsonc` | Worker name `watch-card-proxy`, custom domain route `watch.oliverseydlitz.com` |
 | `.github/workflows/deploy-supabase.yml` | On push to `main` touching `supabase/**`: `supabase functions deploy watch --no-verify-jwt` |
 | `.github/workflows/keepalive.yml` | Daily cron (06:17 UTC) that curls `/health` so the free Supabase project doesn't pause |
@@ -46,6 +48,8 @@ Every response has `Cache-Control: no-store`. Tokens are compared in constant ti
 | GET | `/health` | none | Runs a 1-row DB read; `{"ok":true}`, or 503 `{"ok":false}` if the DB fails |
 | POST | `/card` | `Bearer WRITE_TOKEN` | `{"text"}`, trimmed, 1–1000 chars, else 400. Returns `{id, created_at}` |
 | GET | `/card/latest` | `Bearer READ_TOKEN` | `{id, text, created_at}`, or 404 if empty. `?format=text` returns `text/plain` |
+| GET | `/` | none | Feed page (served by the Cloudflare Worker, not Supabase, because Supabase turns function HTML into text/plain) |
+| POST | `/cards` | `{"passcode"}` = `FEED_PASSCODE` | Newest 50 cards `{cards:[{id,text,created_at}]}`. Wrong code returns 401 and is logged; 10+ wrong codes in the last hour (global) returns 429 for everyone. No `FEED_PASSCODE` set returns 404 |
 | POST | `/mcp/<MCP_PATH_SECRET>` | secret path | MCP Streamable HTTP, stateless, JSON responses. A wrong `/mcp/...` path returns 404 "Not Found". GET on the right path returns 405 (Safari shows that as a download) |
 
 Wrong or missing token returns 401 with an empty body. Unknown routes return 404 JSON.
@@ -70,7 +74,7 @@ create table public.watch_cards (
 Pruning: after each insert, the function deletes everything beyond the newest 50 rows. This is two queries, not atomic, so two concurrent writes could briefly leave 51 rows. That's acceptable.
 
 ## Secrets
-Edge Function secrets are set in the Supabase dashboard: `WRITE_TOKEN`, `READ_TOKEN`, `MCP_PATH_SECRET` (48 hex chars each), plus optional `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID`. Oliver keeps the values in his password manager. **Never commit them or write them into this file.**
+Edge Function secrets are set in the Supabase dashboard: `WRITE_TOKEN`, `READ_TOKEN`, `MCP_PATH_SECRET` (48 hex chars each), plus optional `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` and `FEED_PASSCODE` (4-digit code for the feed page). Oliver keeps the values in his password manager. **Never commit them or write them into this file.**
 
 GitHub repo secret: `SUPABASE_ACCESS_TOKEN`, a fine-grained Supabase token scoped to this project with Edge Functions read-write only. **It expires.** When the deploy Action starts failing with auth errors, generate a new one with the same scope.
 
@@ -80,6 +84,9 @@ Rotation: change the value in Supabase (Edge Functions → Secrets). Rotating `M
 - **Function code:** edit `supabase/functions/watch/index.ts` and push to `main`. The Action redeploys. Verify with the Watch Card MCP tools.
 - **Proxy:** edit `cloudflare/*` and push to `main`. Cloudflare Workers Builds redeploys (root dir `cloudflare`, deploy command `npx wrangler deploy`, preview builds off).
 - **Schema:** the Action does NOT run migrations. Apply them through the Supabase MCP tool and also add the SQL file under `supabase/migrations/`.
+
+## Feed page
+`https://watch.oliverseydlitz.com/` is public, but the cards load only after the server checks the 4-digit `FEED_PASSCODE`. The page remembers the code in localStorage and re-sends it on every refresh (auto-refresh every 30 s and when the tab regains focus). The lock button forgets it. A 4-digit code is weak on its own, so the global limit (10 wrong codes per hour) is what protects it. The trade-off is that someone hammering wrong codes can lock everyone out for up to an hour. The MCP endpoint is unaffected.
 
 ## Keepalive
 Supabase pauses free projects after ~7 days without activity. The keepalive workflow hits `/health` daily, which reads the DB. **GitHub disables scheduled workflows in public repos after 60 days with no repo activity.** If that happens, re-enable it in the Actions tab (GitHub emails a warning first).

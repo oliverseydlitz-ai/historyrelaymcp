@@ -73,6 +73,28 @@ async function latestCard() {
   return data[0] ?? null;
 }
 
+// Feed page passcode: global limit on wrong guesses, since a 4-digit code is easy to brute-force.
+const MAX_FAILURES_PER_HOUR = 10;
+
+async function recentFailures(): Promise<number> {
+  const since = new Date(Date.now() - 3600_000).toISOString();
+  const { count, error } = await db.from("feed_failures").select("id", { count: "exact", head: true }).gte("created_at", since);
+  if (error) throw new Error("failure count failed");
+  return count ?? 0;
+}
+
+async function recordFailure() {
+  await db.from("feed_failures").insert({});
+  await db.from("feed_failures").delete().lt("created_at", new Date(Date.now() - 86400_000).toISOString());
+}
+
+async function listCards() {
+  const { data, error } = await db
+    .from("watch_cards").select("id, text, created_at").order("id", { ascending: false }).limit(50);
+  if (error) throw new Error("read failed");
+  return data;
+}
+
 const HEADERS = { "Cache-Control": "no-store" };
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { ...HEADERS, "Content-Type": "application/json" } });
@@ -173,6 +195,19 @@ Deno.serve(async (req) => {
       const text = validateText(body?.text);
       if (text === null) return json({ error: "text must be a non-empty string of at most 1000 characters" }, 400);
       return json(await insertCard(text));
+    }
+
+    if (path === "/cards" && req.method === "POST") {
+      const passcode = env("FEED_PASSCODE");
+      if (!passcode) return json({ error: "feed disabled" }, 404);
+      if ((await recentFailures()) >= MAX_FAILURES_PER_HOUR) return json({ error: "too many attempts, try again later" }, 429);
+      let body: any;
+      try { body = await req.json(); } catch { return json({ error: "invalid JSON" }, 400); }
+      if (typeof body?.passcode !== "string" || !(await safeEqual(body.passcode.trim(), passcode))) {
+        await recordFailure();
+        return json({ error: "wrong passcode" }, 401);
+      }
+      return json({ cards: await listCards() });
     }
 
     if (path === "/card/latest" && req.method === "GET") {
