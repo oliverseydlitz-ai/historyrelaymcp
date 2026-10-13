@@ -4,8 +4,11 @@ import page from "./index.html";
 
 const TARGET = "https://jdmahrrxtxqrcpcwmwvx.supabase.co/functions/v1/watch";
 
+// Header values must be Latin-1, so city/ISP names (e.g. "Plzeň") are URI-encoded.
+const enc = (v) => (v ? encodeURIComponent(String(v)) : "");
+
 export default {
-  async fetch(request) {
+  async fetch(request, env) {
     const u = new URL(request.url);
     if (u.pathname === "/" && (request.method === "GET" || request.method === "HEAD")) {
       return new Response(page, {
@@ -17,6 +20,24 @@ export default {
         },
       });
     }
-    return fetch(new Request(TARGET + u.pathname + u.search, request));
+
+    // Tell the function who is really calling, so it can block devices that guess passcodes.
+    // PROXY_SECRET (a Worker secret, same value as the Supabase secret) proves these headers came from here.
+    const headers = new Headers(request.headers);
+    for (const h of ["x-watch-proxy-key", "x-watch-client-ip", "x-watch-country", "x-watch-city", "x-watch-asorg"]) headers.delete(h);
+    if (env && env.PROXY_SECRET) {
+      headers.set("x-watch-proxy-key", env.PROXY_SECRET);
+      headers.set("x-watch-client-ip", request.headers.get("cf-connecting-ip") || "");
+      headers.set("x-watch-country", enc(request.cf && request.cf.country));
+      headers.set("x-watch-city", enc(request.cf && request.cf.city));
+      headers.set("x-watch-asorg", enc(request.cf && request.cf.asOrganization));
+    }
+    const hasBody = request.method !== "GET" && request.method !== "HEAD";
+    return fetch(TARGET + u.pathname + u.search, {
+      method: request.method,
+      headers,
+      body: hasBody ? request.body : undefined,
+      redirect: "manual",
+    });
   },
 };

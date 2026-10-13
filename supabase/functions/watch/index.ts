@@ -118,9 +118,36 @@ async function latestCard() {
   return data[0] ?? null;
 }
 
-// Passcodes: one global limit on wrong guesses, since 4-digit codes are easy to brute-force.
-// Feed and admin codes are typed on the same keypad, so they share the counter.
+// Passcodes: 4-digit codes are easy to brute-force, so there are two layers.
+// 1. Per device (IP): 5 wrong codes within 24 hours blocks that IP permanently (unblock on the admin page).
+//    A correct code resets that device's count.
+// 2. Global backstop: 10 wrong codes per hour from anywhere locks the keypad for everyone, since an
+//    attacker can change IPs. Feed and admin codes share one keypad, so they share both counters.
 const MAX_FAILURES_PER_HOUR = 10;
+const MAX_FAILURES_PER_DEVICE_PER_DAY = 5;
+
+type Client = { ip: string | null; country: string | null; city: string | null; asn: string | null; user_agent: string | null };
+const decodeHeader = (v: string | null) => {
+  if (!v) return null;
+  try { return decodeURIComponent(v).slice(0, 120) || null; } catch { return null; }
+};
+
+// Who is calling. The Cloudflare Worker adds the real client IP and location plus PROXY_SECRET as proof.
+// Returns null when PROXY_SECRET is set but the request didn't come through the Worker (spoofing attempt).
+// Without PROXY_SECRET, per-device blocking is off and only the global limit applies.
+async function clientOf(req: Request): Promise<Client | null> {
+  const user_agent = req.headers.get("user-agent")?.slice(0, 300) ?? null;
+  const secret = env("PROXY_SECRET");
+  if (!secret) return { ip: null, country: null, city: null, asn: null, user_agent };
+  if (!(await safeEqual(req.headers.get("x-watch-proxy-key") ?? "", secret))) return null;
+  return {
+    ip: req.headers.get("x-watch-client-ip")?.trim().slice(0, 64) || null,
+    country: decodeHeader(req.headers.get("x-watch-country")),
+    city: decodeHeader(req.headers.get("x-watch-city")),
+    asn: decodeHeader(req.headers.get("x-watch-asorg")),
+    user_agent,
+  };
+}
 
 async function recentFailures(): Promise<number> {
   const since = new Date(Date.now() - 3600_000).toISOString();
@@ -129,9 +156,39 @@ async function recentFailures(): Promise<number> {
   return count ?? 0;
 }
 
-async function recordFailure() {
-  await db.from("feed_failures").insert({});
+async function isBlocked(ip: string | null): Promise<boolean> {
+  if (!ip) return false;
+  const { data } = await db.from("watch_bans").select("ip").eq("ip", ip).maybeSingle();
+  return !!data;
+}
+
+// Runs before any passcode is checked. Returns an error Response, or null to continue.
+async function gate(client: Client | null): Promise<Response | null> {
+  if (!client) return json({ error: "forbidden" }, 400);
+  if (await isBlocked(client.ip)) return json({ error: "device blocked" }, 423);
+  if ((await recentFailures()) >= MAX_FAILURES_PER_HOUR) return json({ error: "too many attempts, try again later" }, 429);
+  return null;
+}
+
+// Logs a wrong code; blocks the device on its 5th wrong code in 24 hours. Returns the response to send.
+async function wrongCode(c: Client): Promise<Response> {
+  const { ip, country, city, asn, user_agent } = c;
+  await db.from("feed_failures").insert({ ip, country, city, asn, user_agent });
   await db.from("feed_failures").delete().lt("created_at", new Date(Date.now() - 86400_000).toISOString());
+  if (!ip) return json({ error: "wrong passcode" }, 401);
+  const { count } = await db.from("feed_failures").select("id", { count: "exact", head: true })
+    .eq("ip", ip).gte("created_at", new Date(Date.now() - 86400_000).toISOString());
+  const n = count ?? 0;
+  if (n >= MAX_FAILURES_PER_DEVICE_PER_DAY) {
+    await db.from("watch_bans").upsert({ ip, failures: n, country, city, asn, user_agent, banned_at: new Date().toISOString() });
+    return json({ error: "device blocked" }, 423);
+  }
+  return json({ error: "wrong passcode", left: MAX_FAILURES_PER_DEVICE_PER_DAY - n }, 401);
+}
+
+// A correct code resets this device's count.
+async function rightCode(c: Client) {
+  if (c.ip) await db.from("feed_failures").delete().eq("ip", c.ip);
 }
 
 async function matches(name: string, given: unknown): Promise<boolean> {
@@ -139,15 +196,21 @@ async function matches(name: string, given: unknown): Promise<boolean> {
   return !!expected && typeof given === "string" && (await safeEqual(given.trim(), expected));
 }
 
-// Checks one passcode env var with the rate limit. Returns an error Response, or null if it matches.
-async function checkPasscode(name: string, given: unknown): Promise<Response | null> {
-  if (!env(name)) return json({ error: "disabled" }, 404);
-  if ((await recentFailures()) >= MAX_FAILURES_PER_HOUR) return json({ error: "too many attempts, try again later" }, 429);
-  if (!(await matches(name, given))) {
-    await recordFailure();
-    return json({ error: "wrong passcode" }, 401);
+// Blocked devices and the last 24 hours of wrong codes grouped by device, for the admin page.
+async function securityState(you: Client) {
+  const [{ data: bans }, { data: fails }] = await Promise.all([
+    db.from("watch_bans").select("ip, banned_at, failures, country, city, asn, user_agent").order("banned_at", { ascending: false }).limit(100),
+    db.from("feed_failures").select("ip, country, city, asn, user_agent, created_at")
+      .gte("created_at", new Date(Date.now() - 86400_000).toISOString()).order("created_at", { ascending: false }).limit(500),
+  ]);
+  const byIp = new Map<string, Record<string, unknown>>();
+  for (const f of fails ?? []) {
+    const key = f.ip ?? "unknown";
+    const g = byIp.get(key);
+    if (g) g.count = (g.count as number) + 1;
+    else byIp.set(key, { ...f, ip: f.ip, count: 1, last: f.created_at });
   }
-  return null;
+  return { bans: bans ?? [], attempts: [...byIp.values()], your_ip: you.ip, per_device_limit: MAX_FAILURES_PER_DEVICE_PER_DAY };
 }
 
 // Trash: deleted cards and removed Telegram recipients, restorable from the admin page. Kept 30 days.
@@ -223,10 +286,11 @@ async function recentBotChats() {
   }
 }
 
-async function adminState() {
+async function adminState(client: Client) {
   const since = new Date(Date.now() - 3600_000).toISOString();
-  const [settings, cards, fails, recipients, trash] = await Promise.all([getSettings(), listCards(), recentFailures(), getRecipients(), listTrash()]);
-  return { settings, cards, recipients, trash, stats: { cards: cards.length, failures_last_hour: fails, max_failures_per_hour: MAX_FAILURES_PER_HOUR, since } };
+  const [settings, cards, fails, recipients, trash, security] = await Promise.all(
+    [getSettings(), listCards(), recentFailures(), getRecipients(), listTrash(), securityState(client)]);
+  return { settings, cards, recipients, trash, security, stats: { cards: cards.length, failures_last_hour: fails, max_failures_per_hour: MAX_FAILURES_PER_HOUR, since } };
 }
 
 async function listCards() {
@@ -341,9 +405,13 @@ Deno.serve(async (req) => {
     if (path === "/cards" && req.method === "POST") {
       let body: any;
       try { body = await req.json(); } catch { return json({ error: "invalid JSON" }, 400); }
-      if (!(await getSettings()).feed_enabled) return json({ error: "feed paused" }, 403);
-      const denied = await checkPasscode("FEED_PASSCODE", body?.passcode);
+      const client = await clientOf(req);
+      const denied = await gate(client);
       if (denied) return denied;
+      if (!(await getSettings()).feed_enabled) return json({ error: "feed paused" }, 403);
+      if (!env("FEED_PASSCODE")) return json({ error: "disabled" }, 404);
+      if (!(await matches("FEED_PASSCODE", body?.passcode))) return await wrongCode(client!);
+      await rightCode(client!);
       return json({ cards: await listCards() });
     }
 
@@ -351,21 +419,29 @@ Deno.serve(async (req) => {
     if (path === "/unlock" && req.method === "POST") {
       let body: any;
       try { body = await req.json(); } catch { return json({ error: "invalid JSON" }, 400); }
-      if ((await recentFailures()) >= MAX_FAILURES_PER_HOUR) return json({ error: "too many attempts, try again later" }, 429);
-      if (await matches("ADMIN_PASSCODE", body?.passcode)) return json({ role: "admin", ...(await adminState()) });
+      const client = await clientOf(req);
+      const denied = await gate(client);
+      if (denied) return denied;
+      if (await matches("ADMIN_PASSCODE", body?.passcode)) {
+        await rightCode(client!);
+        return json({ role: "admin", ...(await adminState(client!)) });
+      }
       if (await matches("FEED_PASSCODE", body?.passcode)) {
         if (!(await getSettings()).feed_enabled) return json({ error: "feed paused" }, 403);
+        await rightCode(client!);
         return json({ role: "feed", cards: await listCards() });
       }
-      await recordFailure();
-      return json({ error: "wrong passcode" }, 401);
+      return await wrongCode(client!);
     }
 
     if (path === "/admin" && req.method === "POST") {
       let body: any;
       try { body = await req.json(); } catch { return json({ error: "invalid JSON" }, 400); }
-      const denied = await checkPasscode("ADMIN_PASSCODE", body?.passcode);
+      const client = await clientOf(req);
+      const denied = await gate(client);
       if (denied) return denied;
+      if (!env("ADMIN_PASSCODE")) return json({ error: "disabled" }, 404);
+      if (!(await matches("ADMIN_PASSCODE", body?.passcode))) return await wrongCode(client!);
 
       switch (body.action ?? "state") {
         case "state":
@@ -419,7 +495,22 @@ Deno.serve(async (req) => {
           break;
         }
         case "find_chats":
-          return json({ ...(await adminState()), found: await recentBotChats() });
+          return json({ ...(await adminState(client!)), found: await recentBotChats() });
+        case "unblock": {
+          if (typeof body.ip !== "string" || !body.ip) return json({ error: "ip required" }, 400);
+          await db.from("watch_bans").delete().eq("ip", body.ip);
+          await db.from("feed_failures").delete().eq("ip", body.ip);
+          break;
+        }
+        case "block": {
+          if (typeof body.ip !== "string" || !body.ip) return json({ error: "ip required" }, 400);
+          if (body.ip === client!.ip) return json({ error: "that's your own device" }, 400);
+          const { data: last } = await db.from("feed_failures").select("country, city, asn, user_agent")
+            .eq("ip", body.ip).order("created_at", { ascending: false }).limit(1).maybeSingle();
+          const { count } = await db.from("feed_failures").select("id", { count: "exact", head: true }).eq("ip", body.ip);
+          await db.from("watch_bans").upsert({ ip: body.ip, failures: count ?? 0, ...(last ?? {}), banned_at: new Date().toISOString() });
+          break;
+        }
         case "reset_lockout": {
           const { error } = await db.from("feed_failures").delete().gte("id", 0);
           if (error) throw new Error("reset failed");
@@ -428,7 +519,7 @@ Deno.serve(async (req) => {
         default:
           return json({ error: "unknown action" }, 400);
       }
-      return json(await adminState());
+      return json(await adminState(client!));
     }
 
     if (path === "/card/latest" && req.method === "GET") {

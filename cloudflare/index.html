@@ -248,6 +248,18 @@
   .added { color: var(--label-2); font-size: 0.875rem; }
   .badge-new { color: var(--green); font-weight: 600; }
 
+  /* Devices (blocked / recent wrong codes) */
+  .device { position: relative; display: flex; align-items: center; gap: 0.75rem; padding: 0.625rem 1rem; }
+  .flag { flex: none; width: 2.25rem; height: 2.25rem; border-radius: 50%; display: grid; place-items: center; font-size: 1.375rem; background: var(--fill); }
+  .device-body { flex: 1; min-width: 0; }
+  .device-body .who { font-size: 1rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .device-body .sub { color: var(--label-2); font-size: 0.8125rem; letter-spacing: 0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .device-body .ip { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.8125rem; color: var(--label); }
+  .you { color: var(--green); font-weight: 600; }
+  .count-pill { flex: none; font-size: 0.8125rem; font-weight: 600; font-variant-numeric: tabular-nums; padding: 0.125rem 0.5rem; border-radius: 999px; background: var(--fill); color: var(--label-2); }
+  .count-pill.hot { background: rgba(255, 69, 58, 0.16); color: var(--red); }
+  .text-btn.danger { color: var(--red); }
+
   /* iOS switch */
   .switch { position: relative; flex: none; width: 3.1875rem; height: 1.9375rem; }
   .switch input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
@@ -429,6 +441,13 @@
   </div>
   <p class="group-footer">10 wrong codes in an hour locks the keypad for everyone, including you.</p>
 
+  <h2 class="group-header" id="bansTitle">Blocked Devices</h2>
+  <div class="group" id="bansList"></div>
+  <p class="group-footer" id="bansFooter">5 wrong codes from one device within 24 hours blocks it for good. A correct code resets its count.</p>
+
+  <h2 class="group-header">Wrong Codes · Last 24 h</h2>
+  <div class="group" id="attemptsList"></div>
+
   <h2 class="group-header" id="cardsTitle">Cards</h2>
   <div class="group" id="adminList"></div>
   <p class="group-footer">Swipe left on a card to move it to Recently Deleted.</p>
@@ -588,7 +607,8 @@
 
   // ================= Lock: passcode keypad =================
   const CODE_LEN = 4;
-  let code = "", passcode = null, adminCode = null, timer = null, busy = false;
+  let code = "", passcode = null, adminCode = null, timer = null, busy = false, triesLeft = null;
+  const BLOCKED_MSG = "This device is blocked.";
   const LETTERS = { 2: "ABC", 3: "DEF", 4: "GHI", 5: "JKL", 6: "MNO", 7: "PQRS", 8: "TUV", 9: "WXYZ" };
 
   // Highlight on touch-down (instant), commit on release; dragging off cancels.
@@ -646,7 +666,10 @@
     if (r === "feed") { store.set(code); showFeed(); return; }
     if (r === "admin") { showAdmin(); return; }
     hint(r === "limit" ? "Too many attempts. Try again later."
-      : r === "wrong" ? "Wrong Passcode"
+      : r === "blocked" ? BLOCKED_MSG
+      : r === "wrong" ? (triesLeft != null && triesLeft <= 3
+          ? "Wrong Passcode · " + triesLeft + (triesLeft === 1 ? " try" : " tries") + " left on this device"
+          : "Wrong Passcode")
       : r === "paused" ? "The feed is paused right now." : "Can't reach the server", true);
     shake();
   }
@@ -655,13 +678,15 @@
   async function post(path, body) {
     try {
       const res = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), cache: "no-store" });
-      const status = res.status === 401 ? "wrong" : res.status === 429 ? "limit" : res.status === 403 ? "paused" : res.ok ? "ok" : "error";
-      return { status, data: res.ok ? await res.json() : null };
+      const status = res.status === 401 ? "wrong" : res.status === 429 ? "limit" : res.status === 403 ? "paused"
+        : res.status === 423 ? "blocked" : res.ok ? "ok" : "error";
+      return { status, data: await res.json().catch(() => null) };
     } catch { return { status: "error", data: null }; }
   }
 
   async function unlock(pc) {
     const { status, data } = await post("/unlock", { passcode: pc });
+    triesLeft = data && typeof data.left === "number" ? data.left : null;
     if (status !== "ok") return status;
     if (data.role === "admin") { adminCode = pc; adminState = data; renderAdmin(); return "admin"; }
     passcode = pc; renderFeed(data.cards); return "feed";
@@ -717,6 +742,7 @@
     if (status === "ok") renderFeed(data.cards);
     else if (status === "wrong") lock("Passcode changed. Enter the new one.");
     else if (status === "paused") lock("The feed is paused right now.");
+    else if (status === "blocked") lock(BLOCKED_MSG);
     else $("status").textContent = "Offline · retrying";
   }
 
@@ -749,6 +775,8 @@
       return true;
     }
     if (status === "wrong") { lock("Admin code changed."); return false; }
+    if (status === "blocked") { lock(BLOCKED_MSG); return false; }
+    if (data && data.error && status === "error") { toast(data.error.charAt(0).toUpperCase() + data.error.slice(1), true); return false; }
     toast(status === "limit" ? "Locked: too many wrong codes" : "Something went wrong", true);
     return false;
   }
@@ -765,6 +793,7 @@
     if (!rcptDirty) renderRecipients(adminState.recipients || []);   // don't wipe unsaved edits
     renderAdminCards(cards);
     renderTrash(adminState.trash || []);
+    renderSecurity(adminState.security);
   }
 
   // ----- Compose -----
@@ -985,6 +1014,62 @@
     $("findBtn").disabled = false; $("findLabel").textContent = "Find New Person";
   });
 
+  // ----- Devices: blocked + recent wrong codes -----
+  const flagOf = (cc) => (cc && /^[A-Z]{2}$/.test(cc) ? String.fromCodePoint(...[...cc].map((c) => 0x1f1e6 + c.charCodeAt(0) - 65)) : "🌐");
+  function deviceName(ua) {
+    if (!ua) return "Unknown device";
+    const os = /iPhone/.test(ua) ? "iPhone" : /iPad/.test(ua) ? "iPad" : /Android/.test(ua) ? "Android" : /Mac OS X/.test(ua) ? "Mac"
+      : /Windows/.test(ua) ? "Windows" : /Linux/.test(ua) ? "Linux" : "Device";
+    const br = /Edg\//.test(ua) ? "Edge" : /CriOS|Chrome\//.test(ua) ? "Chrome" : /FxiOS|Firefox\//.test(ua) ? "Firefox" : /Safari\//.test(ua) ? "Safari" : /curl|python|node|axios|Go-http/i.test(ua) ? "script" : "";
+    if (br === "script" && os === "Device") return "Script (no browser)";
+    return br ? os + " · " + br : os;
+  }
+  const place = (d) => [d.city, d.country].filter(Boolean).join(", ") || "Unknown location";
+  function deviceRow(d, { you, right, sub }) {
+    const row = el("div", "device");
+    const body = el("div", "device-body");
+    const who = el("div", "who");
+    if (you) who.append(el("span", "you", "This device"), " · ");
+    who.append(place(d));
+    const ip = el("div", "sub"); ip.append(el("span", "ip", d.ip || "IP unknown"));
+    body.append(who, ip, el("div", "sub", [deviceName(d.user_agent), d.asn].filter(Boolean).join(" · ")), el("div", "sub", sub));
+    row.append(el("div", "flag", flagOf(d.country)), body, ...right);
+    return row;
+  }
+  function renderSecurity(sec) {
+    if (!sec) return;
+    const bans = sec.bans || [], attempts = sec.attempts || [];
+    const banned = new Set(bans.map((b) => b.ip));
+    $("bansTitle").textContent = "Blocked Devices (" + bans.length + ")";
+    $("bansFooter").textContent = sec.your_ip
+      ? sec.per_device_limit + " wrong codes from one device within 24 hours blocks it for good. A correct code resets its count."
+      : "Device blocking is off: set PROXY_SECRET in both Cloudflare and Supabase to turn it on.";
+    $("bansList").replaceChildren(...(bans.length ? bans.map((b) => {
+      const unblock = el("button", "text-btn", "Unblock");
+      unblock.addEventListener("click", async () => {
+        unblock.disabled = true;
+        if (!(await adminDo("unblock", { ip: b.ip }, place(b) + " unblocked"))) unblock.disabled = false;
+      });
+      return deviceRow(b, { you: b.ip === sec.your_ip, right: [unblock],
+        sub: "Blocked " + ago(parseDate(b.banned_at)).toLowerCase() + " · " + b.failures + " wrong codes" });
+    }) : [el("div", "list-empty", "No blocked devices.")]));
+    $("attemptsList").replaceChildren(...(attempts.length ? attempts.map((a) => {
+      const you = !!a.ip && a.ip === sec.your_ip;
+      const pill = el("span", "count-pill" + (a.count >= sec.per_device_limit - 1 ? " hot" : ""), a.count + " of " + sec.per_device_limit);
+      const right = [pill];
+      if (a.ip && !you && !banned.has(a.ip)) {
+        const block = el("button", "text-btn danger", "Block");
+        block.addEventListener("click", async () => {
+          if (!confirm("Block " + a.ip + " (" + place(a) + ") for good? You can unblock it later.")) return;
+          block.disabled = true;
+          if (!(await adminDo("block", { ip: a.ip }, a.ip + " blocked"))) block.disabled = false;
+        });
+        right.push(block);
+      }
+      return deviceRow(a, { you, right, sub: "Last try " + ago(parseDate(a.last)).toLowerCase() + (banned.has(a.ip) ? " · blocked" : "") });
+    }) : [el("div", "list-empty", "No wrong codes in the last 24 hours.")]));
+  }
+
   // ----- Recently Deleted -----
   const ICONS = {
     card: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="5" y="4" width="14" height="16" rx="3"/><path d="M9 9h6M9 13h6M9 17h3"/></svg>',
@@ -1033,7 +1118,11 @@
   if (!saved) { show("lock"); return; }
   post("/cards", { passcode: saved }).then(({ status, data }) => {
     if (status === "ok") { passcode = saved; renderFeed(data.cards); showFeed(); }
-    else if (status === "wrong" || status === "paused") { store.clear(); show("lock"); if (status === "paused") hint("The feed is paused right now.", true); }
+    else if (status === "wrong" || status === "paused" || status === "blocked") {
+      store.clear(); show("lock");
+      if (status === "paused") hint("The feed is paused right now.", true);
+      if (status === "blocked") hint(BLOCKED_MSG, true);
+    }
     else { passcode = saved; show("feed"); $("status").textContent = "Offline · retrying"; timer = setInterval(refresh, 30000); }
   });
 })();
