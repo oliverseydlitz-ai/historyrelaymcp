@@ -92,31 +92,33 @@ async function latestCard() {
   return data[0] ?? null;
 }
 
-// Passcodes: global limit on wrong guesses per kind, since short codes are easy to brute-force.
-// Feed and admin are counted separately so a feed lockout can't lock out the admin.
-const MAX_FAILURES_PER_HOUR = { feed: 10, admin: 5 };
-type FailureKind = keyof typeof MAX_FAILURES_PER_HOUR;
+// Passcodes: one global limit on wrong guesses, since 4-digit codes are easy to brute-force.
+// Feed and admin codes are typed on the same keypad, so they share the counter.
+const MAX_FAILURES_PER_HOUR = 10;
 
-async function recentFailures(kind: FailureKind): Promise<number> {
+async function recentFailures(): Promise<number> {
   const since = new Date(Date.now() - 3600_000).toISOString();
-  const { count, error } = await db.from("feed_failures").select("id", { count: "exact", head: true })
-    .eq("kind", kind).gte("created_at", since);
+  const { count, error } = await db.from("feed_failures").select("id", { count: "exact", head: true }).gte("created_at", since);
   if (error) throw new Error("failure count failed");
   return count ?? 0;
 }
 
-async function recordFailure(kind: FailureKind) {
-  await db.from("feed_failures").insert({ kind });
+async function recordFailure() {
+  await db.from("feed_failures").insert({});
   await db.from("feed_failures").delete().lt("created_at", new Date(Date.now() - 86400_000).toISOString());
 }
 
-// Checks a passcode against env var `name`, enforcing the per-kind rate limit. Returns an error Response or null if OK.
-async function checkPasscode(name: string, kind: FailureKind, given: unknown): Promise<Response | null> {
+async function matches(name: string, given: unknown): Promise<boolean> {
   const expected = env(name);
-  if (!expected) return json({ error: "disabled" }, 404);
-  if ((await recentFailures(kind)) >= MAX_FAILURES_PER_HOUR[kind]) return json({ error: "too many attempts, try again later" }, 429);
-  if (typeof given !== "string" || !(await safeEqual(given.trim(), expected))) {
-    await recordFailure(kind);
+  return !!expected && typeof given === "string" && (await safeEqual(given.trim(), expected));
+}
+
+// Checks one passcode env var with the rate limit. Returns an error Response, or null if it matches.
+async function checkPasscode(name: string, given: unknown): Promise<Response | null> {
+  if (!env(name)) return json({ error: "disabled" }, 404);
+  if ((await recentFailures()) >= MAX_FAILURES_PER_HOUR) return json({ error: "too many attempts, try again later" }, 429);
+  if (!(await matches(name, given))) {
+    await recordFailure();
     return json({ error: "wrong passcode" }, 401);
   }
   return null;
@@ -124,13 +126,8 @@ async function checkPasscode(name: string, kind: FailureKind, given: unknown): P
 
 async function adminState() {
   const since = new Date(Date.now() - 3600_000).toISOString();
-  const [settings, cards, feedFails, adminFails] = await Promise.all([
-    getSettings(),
-    listCards(),
-    recentFailures("feed"),
-    recentFailures("admin"),
-  ]);
-  return { settings, cards, stats: { cards: cards.length, feed_failures_last_hour: feedFails, admin_failures_last_hour: adminFails, since } };
+  const [settings, cards, fails] = await Promise.all([getSettings(), listCards(), recentFailures()]);
+  return { settings, cards, stats: { cards: cards.length, failures_last_hour: fails, max_failures_per_hour: MAX_FAILURES_PER_HOUR, since } };
 }
 
 async function listCards() {
@@ -246,15 +243,29 @@ Deno.serve(async (req) => {
       let body: any;
       try { body = await req.json(); } catch { return json({ error: "invalid JSON" }, 400); }
       if (!(await getSettings()).feed_enabled) return json({ error: "feed paused" }, 403);
-      const denied = await checkPasscode("FEED_PASSCODE", "feed", body?.passcode);
+      const denied = await checkPasscode("FEED_PASSCODE", body?.passcode);
       if (denied) return denied;
       return json({ cards: await listCards() });
+    }
+
+    // The keypad: one 4-digit code decides between the admin panel and the feed.
+    if (path === "/unlock" && req.method === "POST") {
+      let body: any;
+      try { body = await req.json(); } catch { return json({ error: "invalid JSON" }, 400); }
+      if ((await recentFailures()) >= MAX_FAILURES_PER_HOUR) return json({ error: "too many attempts, try again later" }, 429);
+      if (await matches("ADMIN_PASSCODE", body?.passcode)) return json({ role: "admin", ...(await adminState()) });
+      if (await matches("FEED_PASSCODE", body?.passcode)) {
+        if (!(await getSettings()).feed_enabled) return json({ error: "feed paused" }, 403);
+        return json({ role: "feed", cards: await listCards() });
+      }
+      await recordFailure();
+      return json({ error: "wrong passcode" }, 401);
     }
 
     if (path === "/admin" && req.method === "POST") {
       let body: any;
       try { body = await req.json(); } catch { return json({ error: "invalid JSON" }, 400); }
-      const denied = await checkPasscode("ADMIN_PASSCODE", "admin", body?.passcode);
+      const denied = await checkPasscode("ADMIN_PASSCODE", body?.passcode);
       if (denied) return denied;
 
       switch (body.action ?? "state") {
@@ -280,7 +291,7 @@ Deno.serve(async (req) => {
           break;
         }
         case "reset_lockout": {
-          const { error } = await db.from("feed_failures").delete().eq("kind", "feed");
+          const { error } = await db.from("feed_failures").delete().gte("id", 0);
           if (error) throw new Error("reset failed");
           break;
         }

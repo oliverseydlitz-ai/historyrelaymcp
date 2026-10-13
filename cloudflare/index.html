@@ -86,9 +86,6 @@
   .badge { color: var(--accent); font-weight: 600; letter-spacing: .04em; text-transform: uppercase; font-size: 11px; }
   .empty { text-align: center; color: var(--muted); padding: 60px 0; }
 
-  .mode-link { background: none; border: 0; color: var(--muted); font: inherit; font-size: 14px; padding: 8px 14px; cursor: pointer; }
-  .dots.long { gap: 10px; }
-  .dots.long .dot { width: 12px; height: 12px; }
 
   /* Admin */
   #admin { display: none; padding-bottom: 40px; }
@@ -138,7 +135,6 @@
     <p class="hint" id="hint">Enter passcode</p>
     <div class="dots" id="dots"></div>
     <div class="pad" id="pad"></div>
-    <button class="mode-link" id="modeBtn">Admin</button>
   </section>
 
   <section id="feed">
@@ -179,9 +175,8 @@
 
     <div class="panel">
       <h2>Security</h2>
-      <div class="row"><div><div class="label">Wrong feed codes</div><div class="sub" id="feedFails"></div></div>
-        <button class="btn secondary" id="resetLockout">Reset lockout</button></div>
-      <div class="row"><div><div class="label">Wrong admin codes</div><div class="sub" id="adminFails"></div></div></div>
+      <div class="row"><div><div class="label">Wrong codes</div><div class="sub" id="feedFails"></div></div>
+        <button class="btn secondary" id="resetLockout">Reset counter</button></div>
     </div>
 
     <div class="panel">
@@ -202,16 +197,14 @@
   };
   const $ = (id) => document.getElementById(id);
   let code = "", passcode = null, timer = null, busy = false;
-  let mode = "feed";            // "feed" (4 digits) or "admin" (8 digits)
   let adminCode = null;         // admin code lives in memory only, never in storage
-  const codeLen = () => (mode === "admin" ? 8 : 4);
+  const CODE_LEN = 4;
 
-  function setMode(m) {
-    mode = m; code = "";
-    $("dots").replaceChildren(...Array.from({ length: codeLen() }, () => Object.assign(document.createElement("span"), { className: "dot" })));
-    $("dots").classList.toggle("long", m === "admin");
-    $("modeBtn").textContent = m === "admin" ? "Back to feed" : "Admin";
-    hint(m === "admin" ? "Enter admin code" : "Enter passcode");
+  // The server decides what a code unlocks: the feed code opens the feed, the admin code opens the admin panel.
+  function resetKeypad() {
+    code = "";
+    $("dots").replaceChildren(...Array.from({ length: CODE_LEN }, () => Object.assign(document.createElement("span"), { className: "dot" })));
+    hint("Enter passcode");
   }
 
   // Keypad
@@ -224,7 +217,7 @@
     b.addEventListener("click", () => press(k));
     $("pad").appendChild(b);
   }
-  setMode("feed");
+  resetKeypad();
   document.addEventListener("keydown", (e) => {
     if ($("lock").style.display === "none") return;
     if (/^\d$/.test(e.key)) press(e.key);
@@ -239,16 +232,16 @@
   async function press(k) {
     if (busy) return;
     if (k === "⌫") code = code.slice(0, -1);
-    else if (code.length < codeLen()) code += k;
+    else if (code.length < CODE_LEN) code += k;
     drawDots();
-    if (code.length === codeLen()) {
+    if (code.length === CODE_LEN) {
       busy = true;
       hint("Checking…");
-      const r = mode === "admin" ? await adminCall("state", {}, code) : await load(code);
+      const r = await unlock(code);
       busy = false;
-      if (r === "ok") {
-        if (mode === "admin") showAdmin(); else { store.set(code); showFeed(); }
-      } else {
+      if (r === "feed") { store.set(code); showFeed(); }
+      else if (r === "admin") showAdmin();
+      else {
         $("dots").classList.add("shake");
         setTimeout(() => $("dots").classList.remove("shake"), 400);
         hint(r === "limit" ? "Too many attempts. Try again later." : r === "wrong" ? "Wrong code"
@@ -259,6 +252,26 @@
   }
 
   // Data
+  async function unlock(pc) {
+    try {
+      const res = await fetch("/unlock", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ passcode: pc }),
+        cache: "no-store",
+      });
+      if (res.status === 401) return "wrong";
+      if (res.status === 429) return "limit";
+      if (res.status === 403) return "paused";
+      if (!res.ok) return "error";
+      const data = await res.json();
+      if (data.role === "admin") { adminCode = pc; adminState = data; renderAdmin(); return "admin"; }
+      passcode = pc;
+      render(data.cards);
+      return "feed";
+    } catch { return "error"; }
+  }
+
   async function load(pc) {
     try {
       const res = await fetch("/cards", {
@@ -335,7 +348,7 @@
   function lock(msg) {
     clearInterval(timer);
     passcode = null; adminCode = null; store.clear();
-    setMode("feed");
+    resetKeypad();
     $("feed").style.display = "none";
     $("admin").style.display = "none";
     $("lock").style.display = "flex";
@@ -343,7 +356,7 @@
   }
 
   // ---- Admin ----
-  let adminState = null;
+  var adminState = null;
   function toast(msg, err) {
     const t = $("toast"); t.textContent = msg; t.classList.toggle("err", !!err); t.classList.add("show");
     clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove("show"), 2200);
@@ -380,8 +393,8 @@
   function renderAdmin() {
     const { settings, cards, stats } = adminState;
     document.querySelectorAll("#admin [data-key]").forEach((el) => { el.checked = !!settings[el.dataset.key]; });
-    $("feedFails").textContent = stats.feed_failures_last_hour + " / 10 in the last hour" + (stats.feed_failures_last_hour >= 10 ? " · locked" : "");
-    $("adminFails").textContent = stats.admin_failures_last_hour + " / 5 in the last hour";
+    $("feedFails").textContent = stats.failures_last_hour + " / " + stats.max_failures_per_hour + " in the last hour"
+      + (stats.failures_last_hour >= stats.max_failures_per_hour ? " · locked" : "");
     $("cardsTitle").textContent = "Cards (" + cards.length + ")";
     $("adminStatus").textContent = "updated " + clock(new Date());
     const list = $("adminList");
@@ -413,7 +426,6 @@
     window.scrollTo(0, 0);
   }
 
-  $("modeBtn").addEventListener("click", () => setMode(mode === "admin" ? "feed" : "admin"));
   $("adminExit").addEventListener("click", () => lock());
   $("adminRefresh").addEventListener("click", () => adminDo("state", {}));
   $("compose").addEventListener("input", () => { $("count").textContent = $("compose").value.length + " / 1000"; });
@@ -430,7 +442,7 @@
     if (!ok) el.checked = !el.checked;
     el.disabled = false;
   }));
-  $("resetLockout").addEventListener("click", () => adminDo("reset_lockout", {}, "Lockout reset"));
+  $("resetLockout").addEventListener("click", () => adminDo("reset_lockout", {}, "Counter reset"));
 
   $("refresh").addEventListener("click", refresh);
   $("lockBtn").addEventListener("click", () => lock());

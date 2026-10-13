@@ -51,7 +51,8 @@ Every response has `Cache-Control: no-store`. Tokens are compared in constant ti
 | GET | `/card/latest` | `Bearer READ_TOKEN` | `{id, text, created_at}`, or 404 if empty. `?format=text` returns `text/plain` |
 | GET | `/` | none | Feed page (served by the Cloudflare Worker, not Supabase, because Supabase turns function HTML into text/plain) |
 | POST | `/cards` | `{"passcode"}` = `FEED_PASSCODE` | Newest 50 cards `{cards:[{id,text,created_at}]}`. Wrong code returns 401 and is logged; 10+ wrong codes in the last hour (global) returns 429 for everyone. `feed_enabled` off returns 403. No `FEED_PASSCODE` set returns 404 |
-| POST | `/admin` | `{"passcode"}` = `ADMIN_PASSCODE` (8 digits) | `{action}`: `state`, `post` `{text}`, `delete` `{id}`, `set` `{key, value:boolean}`, `reset_lockout`. Every action returns `{settings, cards, stats}`. Own limit: 5 wrong codes/hour |
+| POST | `/unlock` | `{"passcode"}` | What the keypad calls. Admin code returns `{role:"admin", settings, cards, stats}`; feed code returns `{role:"feed", cards}` (403 if the feed is paused); wrong code returns 401 and counts toward the limit |
+| POST | `/admin` | `{"passcode"}` = `ADMIN_PASSCODE` (4 digits) | `{action}`: `state`, `post` `{text}`, `delete` `{id}`, `set` `{key, value:boolean}`, `reset_lockout`. Every action returns `{settings, cards, stats}` |
 | POST | `/mcp/<MCP_PATH_SECRET>` | secret path | MCP Streamable HTTP, stateless, JSON responses. A wrong `/mcp/...` path returns 404 "Not Found". GET on the right path returns 405 (Safari shows that as a download) |
 
 Wrong or missing token returns 401 with an empty body. Unknown routes return 404 JSON.
@@ -76,7 +77,7 @@ create table public.watch_cards (
 Pruning: after each insert, the function deletes everything beyond the newest 50 rows. This is two queries, not atomic, so two concurrent writes could briefly leave 51 rows. That's acceptable.
 
 ## Secrets
-Edge Function secrets are set in the Supabase dashboard: `WRITE_TOKEN`, `READ_TOKEN`, `MCP_PATH_SECRET` (48 hex chars each), plus optional `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` `FEED_PASSCODE` (4-digit code for the feed page) and `ADMIN_PASSCODE` (8-digit code for the admin page). Oliver keeps the values in his password manager. **Never commit them or write them into this file.**
+Edge Function secrets are set in the Supabase dashboard: `WRITE_TOKEN`, `READ_TOKEN`, `MCP_PATH_SECRET` (48 hex chars each), plus optional `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` `FEED_PASSCODE` (4-digit code for the feed page) and `ADMIN_PASSCODE` (4-digit code for the admin page; must differ from `FEED_PASSCODE`). Oliver keeps the values in his password manager. **Never commit them or write them into this file.**
 
 GitHub repo secret: `SUPABASE_ACCESS_TOKEN`, a fine-grained Supabase token scoped to this project with Edge Functions read-write only. **It expires.** When the deploy Action starts failing with auth errors, generate a new one with the same scope.
 
@@ -91,7 +92,9 @@ Rotation: change the value in Supabase (Edge Functions → Secrets). Rotating `M
 `https://watch.oliverseydlitz.com/` is public, but the cards load only after the server checks the 4-digit `FEED_PASSCODE`. The page remembers the code in localStorage and re-sends it on every refresh (auto-refresh every 30 s and when the tab regains focus). The lock button forgets it. A 4-digit code is weak on its own, so the global limit (10 wrong codes per hour) is what protects it. The trade-off is that someone hammering wrong codes can lock everyone out for up to an hour. The MCP endpoint is unaffected.
 
 ## Admin page
-The "Admin" link under the keypad switches to an 8-digit code (`ADMIN_PASSCODE`), checked by the server on every request and kept only in page memory (never localStorage). Admin can post a card (same path as MCP saves, so Telegram fires), delete cards, flip the settings in `watch_settings` (`feed_enabled`, `telegram_enabled`, `telegram_include_text`; defaults true/true/false in `DEFAULT_SETTINGS`), and reset the feed lockout. Admin failures are counted separately (`kind='admin'`, 5/hour), so a feed lockout never blocks the admin.
+There is one 4-digit keypad. It sends the code to `POST /unlock`, and the server decides: `ADMIN_PASSCODE` opens the admin panel, `FEED_PASSCODE` opens the feed (admin is checked first, so the two must differ). The admin code is kept only in page memory (never localStorage) and is re-checked by `/admin` on every action. Admin can post a card (same path as MCP saves, so Telegram fires), delete cards, flip the settings in `watch_settings` (`feed_enabled`, `telegram_enabled`, `telegram_include_text`; defaults true/true/false in `DEFAULT_SETTINGS`), and reset the wrong-code counter.
+
+All wrong codes (feed, admin, `/unlock`, `/cards`, `/admin`) share one global counter: 10 per hour, then everything, admin included, returns 429 until it ages out. With a 4-digit admin code that limit is the only protection (roughly 3 weeks of nonstop guessing on average to find it). If a lockout blocks Oliver, clear it with `delete from public.feed_failures;` via Supabase SQL.
 
 ## Keepalive
 Supabase pauses free projects after ~7 days without activity. The keepalive workflow hits `/health` daily, which reads the DB. **GitHub disables scheduled workflows in public repos after 60 days with no repo activity.** If that happens, re-enable it in the Actions tab (GitHub emails a warning first).
