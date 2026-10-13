@@ -150,10 +150,48 @@ async function checkPasscode(name: string, given: unknown): Promise<Response | n
   return null;
 }
 
+// Trash: deleted cards and removed Telegram recipients, restorable from the admin page. Kept 30 days.
+const TRASH_DAYS = 30;
+
+async function toTrash(kind: "card" | "recipient", items: unknown[]) {
+  if (!items.length) return;
+  const { error } = await db.from("watch_trash").insert(items.map((data) => ({ kind, data })));
+  if (error) throw new Error("trash insert failed");
+  await db.from("watch_trash").delete().lt("deleted_at", new Date(Date.now() - TRASH_DAYS * 86400_000).toISOString());
+}
+
+async function listTrash() {
+  const { data, error } = await db.from("watch_trash").select("id, kind, data, deleted_at").order("id", { ascending: false }).limit(100);
+  if (error) throw new Error("trash read failed");
+  return data;
+}
+
+async function saveRecipients(recipients: Recipient[]) {
+  const { error } = await db.from("watch_settings")
+    .upsert({ key: "telegram_recipients", value: recipients, updated_at: new Date().toISOString() });
+  if (error) throw new Error("recipients update failed");
+}
+
+// Puts a trashed item back: cards keep their original id and time (no Telegram ping), people go to the end of the list.
+async function restoreFromTrash(trashId: number): Promise<string | null> {
+  const { data: item } = await db.from("watch_trash").select("id, kind, data").eq("id", trashId).maybeSingle();
+  if (!item) return "not in trash";
+  if (item.kind === "card") {
+    const { error } = await db.from("watch_cards").upsert({ id: item.data.id, text: item.data.text, created_at: item.data.created_at });
+    if (error) throw new Error("card restore failed");
+  } else {
+    const list = await getRecipients();
+    if (list.length >= MAX_RECIPIENTS) return "recipient list is full";
+    if (!list.some((r) => r.chat_id === item.data.chat_id)) await saveRecipients([...list, item.data as Recipient]);
+  }
+  await db.from("watch_trash").delete().eq("id", trashId);
+  return null;
+}
+
 async function adminState() {
   const since = new Date(Date.now() - 3600_000).toISOString();
-  const [settings, cards, fails, recipients] = await Promise.all([getSettings(), listCards(), recentFailures(), getRecipients()]);
-  return { settings, cards, recipients, stats: { cards: cards.length, failures_last_hour: fails, max_failures_per_hour: MAX_FAILURES_PER_HOUR, since } };
+  const [settings, cards, fails, recipients, trash] = await Promise.all([getSettings(), listCards(), recentFailures(), getRecipients(), listTrash()]);
+  return { settings, cards, recipients, trash, stats: { cards: cards.length, failures_last_hour: fails, max_failures_per_hour: MAX_FAILURES_PER_HOUR, since } };
 }
 
 async function listCards() {
@@ -305,8 +343,12 @@ Deno.serve(async (req) => {
         }
         case "delete": {
           if (!Number.isInteger(body.id)) return json({ error: "id must be an integer" }, 400);
-          const { error } = await db.from("watch_cards").delete().eq("id", body.id);
-          if (error) throw new Error("delete failed");
+          const { data: card } = await db.from("watch_cards").select("id, text, created_at").eq("id", body.id).maybeSingle();
+          if (card) {
+            await toTrash("card", [card]);
+            const { error } = await db.from("watch_cards").delete().eq("id", body.id);
+            if (error) throw new Error("delete failed");
+          }
           break;
         }
         case "set": {
@@ -319,9 +361,26 @@ Deno.serve(async (req) => {
         case "set_recipients": {
           const recipients = cleanRecipients(body.recipients);
           if (!recipients) return json({ error: "each row needs a numeric chat ID (5-20 digits), max 20 rows" }, 400);
-          const { error } = await db.from("watch_settings")
-            .upsert({ key: "telegram_recipients", value: recipients, updated_at: new Date().toISOString() });
-          if (error) throw new Error("recipients update failed");
+          const kept = new Set(recipients.map((r) => r.chat_id));
+          await toTrash("recipient", (await getRecipients()).filter((r) => !kept.has(r.chat_id)));
+          await saveRecipients(recipients);
+          break;
+        }
+        case "restore": {
+          if (!Number.isInteger(body.trash_id)) return json({ error: "trash_id must be an integer" }, 400);
+          const problem = await restoreFromTrash(body.trash_id);
+          if (problem) return json({ error: problem }, 400);
+          break;
+        }
+        case "purge": {
+          if (!Number.isInteger(body.trash_id)) return json({ error: "trash_id must be an integer" }, 400);
+          const { error } = await db.from("watch_trash").delete().eq("id", body.trash_id);
+          if (error) throw new Error("purge failed");
+          break;
+        }
+        case "empty_trash": {
+          const { error } = await db.from("watch_trash").delete().gte("id", 0);
+          if (error) throw new Error("empty trash failed");
           break;
         }
         case "reset_lockout": {

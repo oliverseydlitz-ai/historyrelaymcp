@@ -205,6 +205,25 @@
   .rcpt .name { flex: 1 1 40%; }
   .rcpt .cid { flex: 1 1 60%; text-align: right; font-variant-numeric: tabular-nums; color: var(--label-2); }
   .rcpt .cid.bad { color: var(--red); }
+  .minus { transition: transform 0.25s ease-out; }
+  .rcpt.confirm .minus { transform: rotate(-90deg); }
+  .rcpt .confirm-del {
+    display: none; flex: none; border: 0; border-radius: 0.5rem; padding: 0.4375rem 0.875rem; cursor: pointer;
+    background: var(--red); color: #fff; font-size: 0.9375rem; font-weight: 600;
+  }
+  .rcpt.confirm .confirm-del { display: block; animation: reveal 0.22s ease-out; }
+  .rcpt.confirm .cid { display: none; }
+  @keyframes reveal { from { opacity: 0; transform: translateX(0.5rem); } }
+  .trash-item { display: flex; align-items: center; gap: 0.75rem; }
+  .trash-icon { flex: none; width: 1.875rem; height: 1.875rem; border-radius: 0.4375rem; display: grid; place-items: center; color: #fff; }
+  .trash-icon.kind-card { background: var(--tint); }
+  .trash-icon.kind-recipient { background: var(--green); }
+  .trash-icon svg { width: 1.125rem; height: 1.125rem; }
+  .trash-body { flex: 1; min-width: 0; }
+  .swipe-front .trash-body .text { -webkit-line-clamp: 2; }
+  .restore { flex: none; border: 0; background: none; color: var(--tint); font-size: 0.9375rem; font-weight: 600; cursor: pointer; padding: 0.375rem 0; }
+  .restore:active { opacity: 0.5; }
+  .pill.danger { background: none; color: var(--red); padding-right: 0; }
   .add-icon { width: 1.375rem; height: 1.375rem; border-radius: 50%; background: var(--green); display: grid; place-items: center; flex: none; }
   .add-icon::before { content: "+"; color: #fff; font-weight: 600; font-size: 1.125rem; line-height: 1; margin-top: -1px; }
 
@@ -328,7 +347,14 @@
 
   <h2 class="group-header" id="cardsTitle">Cards</h2>
   <div class="group" id="adminList"></div>
-  <p class="group-footer">Swipe left on a card to delete it.</p>
+  <p class="group-footer">Swipe left on a card to move it to Recently Deleted.</p>
+
+  <h2 class="group-header" id="trashTitle">Recently Deleted</h2>
+  <div class="group" id="trashList"></div>
+  <div class="group-footer footer-row">
+    <span>Deleted cards and people stay here for 30 days. Swipe left to delete one for good.</span>
+    <button class="pill danger" id="emptyTrash">Empty</button>
+  </div>
 </section>
 
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
@@ -617,6 +643,7 @@
     $("cardsTitle").textContent = "Cards (" + cards.length + ")";
     if (!rcptDirty) renderRecipients(adminState.recipients || []);   // don't wipe unsaved edits
     renderAdminCards(cards);
+    renderTrash(adminState.trash || []);
   }
 
   // ----- Compose -----
@@ -650,12 +677,39 @@
     const name = Object.assign(el("input", "name"), { placeholder: "Name", value: r.name || "", maxLength: 40 });
     const id = Object.assign(el("input", "cid"), { placeholder: "Chat ID", value: r.chat_id || "", inputMode: "numeric" });
     name.setAttribute("aria-label", "Name"); id.setAttribute("aria-label", "Chat ID");
-    minus.addEventListener("click", () => { row.remove(); renumber(); markDirty(); });
+    const confirmDel = el("button", "confirm-del", "Delete");
+    minus.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (!name.value.trim() && !id.value.trim()) { row.remove(); renumber(); return; }   // empty new row: nothing to lose
+      const on = !row.classList.contains("confirm");
+      cancelRcptConfirm();
+      if (on) { row.classList.add("confirm"); confirmDel.focus(); }
+    });
+    confirmDel.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      const rows = collectRecipients(row);
+      if (!rows) return toast("Fix the red chat IDs first", true);
+      confirmDel.disabled = true;
+      const who = name.value.trim() || "Person";
+      if (await adminDo("set_recipients", { recipients: rows }, who + " moved to Recently Deleted")) return;
+      confirmDel.disabled = false;
+    });
     name.addEventListener("input", markDirty);
     id.addEventListener("input", () => { markDirty(); id.classList.remove("bad"); });
     id.addEventListener("blur", () => id.classList.toggle("bad", id.value.trim() !== "" && !validId(id.value.trim())));
-    row.append(minus, el("span", "num"), name, id);
+    row.append(minus, el("span", "num"), name, id, confirmDel);
     return row;
+  }
+  function cancelRcptConfirm() { document.querySelectorAll(".rcpt.confirm").forEach((r) => r.classList.remove("confirm")); }
+  document.addEventListener("pointerdown", (e) => { if (!e.target.closest(".rcpt.confirm")) cancelRcptConfirm(); });
+  // Reads the editor rows (optionally skipping one). Returns null if any chat ID is invalid.
+  function collectRecipients(skip) {
+    const rows = [...$("rcptList").children].filter((row) => row !== skip)
+      .map((row) => ({ name: row.querySelector(".name").value.trim(), chat_id: row.querySelector(".cid").value.trim(), el: row.querySelector(".cid") }))
+      .filter((r) => r.name || r.chat_id);
+    const bad = rows.filter((r) => !validId(r.chat_id));
+    bad.forEach((r) => r.el.classList.add("bad"));
+    return bad.length ? null : rows.map(({ name, chat_id }) => ({ name, chat_id }));
   }
   function renumber() { [...$("rcptList").children].forEach((row, i) => { row.querySelector(".num").textContent = i + 1; }); }
   function renderRecipients(list) {
@@ -668,14 +722,10 @@
     $("rcptList").lastChild.querySelector(".name").focus();
   });
   $("rcptSave").addEventListener("click", async () => {
-    const rows = [...$("rcptList").children]
-      .map((row) => ({ name: row.querySelector(".name").value.trim(), chat_id: row.querySelector(".cid").value.trim(), el: row.querySelector(".cid") }))
-      .filter((r) => r.name || r.chat_id);
-    const bad = rows.filter((r) => !validId(r.chat_id));
-    bad.forEach((r) => r.el.classList.add("bad"));
-    if (bad.length) return toast("Chat IDs must be numbers", true);
+    const rows = collectRecipients();
+    if (!rows) return toast("Chat IDs must be numbers", true);
     $("rcptSave").disabled = true;
-    if (!(await adminDo("set_recipients", { recipients: rows.map(({ name, chat_id }) => ({ name, chat_id })) }, "Recipients saved"))) $("rcptSave").disabled = false;
+    if (!(await adminDo("set_recipients", { recipients: rows }, "Recipients saved"))) $("rcptSave").disabled = false;
   });
 
   // ----- Cards with swipe-to-delete (1:1 tracking, momentum projection, velocity hand-off) -----
@@ -683,9 +733,9 @@
   function closeOpenRow() { if (openRow) openRow.settle(0); openRow = null; }
   document.addEventListener("pointerdown", (e) => { if (openRow && !openRow.root.contains(e.target)) closeOpenRow(); });
 
-  function swipeRow(content, onDelete) {
+  function swipeRow(content, onDelete, label = "Delete", confirmText = null) {
     const root = el("div", "swipe");
-    const del = el("button", "swipe-delete", "Delete");
+    const del = el("button", "swipe-delete", label);
     const front = el("div", "swipe-front");
     front.append(...content);
     root.append(del, front);
@@ -739,10 +789,11 @@
     front.addEventListener("click", () => { if (suppressClick) { suppressClick = false; return; } if (x !== 0) row.settle(0); });
     del.addEventListener("focus", () => row.settle(-W));       // keyboard users reveal it by tabbing
     del.addEventListener("click", async () => {
+      if (confirmText && !confirm(confirmText)) { del.blur(); row.settle(0); return; }   // ask before anything moves
       del.disabled = true;
       anim && anim.stop();
       anim = spring({ from: x, to: -front.offsetWidth, damping: 1, response: 0.3, precision: 1, onUpdate: set });
-      if (!(await onDelete())) { del.disabled = false; row.settle(0); }
+      if (!(await onDelete())) { del.disabled = false; del.blur(); row.settle(0); }
     });
     return root;
   }
@@ -755,10 +806,41 @@
       const d = parseDate(c.created_at);
       return swipeRow(
         [el("p", "text", c.text), el("div", "meta", "#" + c.id + " · " + ago(d) + " · " + clock(d))],
-        () => adminDo("delete", { id: c.id }, "Card #" + c.id + " deleted"),
+        () => adminDo("delete", { id: c.id }, "Card #" + c.id + " moved to Recently Deleted"),
       );
     }));
   }
+
+  // ----- Recently Deleted -----
+  const ICONS = {
+    card: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="5" y="4" width="14" height="16" rx="3"/><path d="M9 9h6M9 13h6M9 17h3"/></svg>',
+    recipient: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="3.5"/><path d="M5 20a7 7 0 0 1 14 0"/></svg>',
+  };
+  function renderTrash(items) {
+    const list = $("trashList");
+    $("trashTitle").textContent = "Recently Deleted (" + items.length + ")";
+    $("emptyTrash").disabled = items.length === 0;
+    if (!items.length) { list.replaceChildren(el("div", "list-empty", "Nothing here.")); return; }
+    list.replaceChildren(...items.map((t) => {
+      const when = ago(parseDate(t.deleted_at));
+      const icon = el("div", "trash-icon kind-" + t.kind); icon.innerHTML = ICONS[t.kind];
+      const body = el("div", "trash-body");
+      if (t.kind === "card") body.append(el("p", "text", t.data.text), el("div", "meta", "Card #" + t.data.id + " · deleted " + when.toLowerCase()));
+      else body.append(el("p", "text", t.data.name || "Unnamed"), el("div", "meta", t.data.chat_id + " · removed " + when.toLowerCase()));
+      const restore = el("button", "restore", "Restore");
+      restore.addEventListener("click", async (e) => {
+        e.stopPropagation(); restore.disabled = true;
+        const what = t.kind === "card" ? "Card #" + t.data.id : (t.data.name || "Person");
+        if (!(await adminDo("restore", { trash_id: t.id }, what + " restored"))) restore.disabled = false;
+      });
+      const item = el("div", "trash-item"); item.append(icon, body, restore);
+      return swipeRow([item], () => adminDo("purge", { trash_id: t.id }, "Deleted for good"),
+        "Delete", "Delete this for good? This can't be undone.");
+    }));
+  }
+  $("emptyTrash").addEventListener("click", () => {
+    if (confirm("Empty Recently Deleted? Everything in it is deleted for good.")) adminDo("empty_trash", {}, "Recently Deleted emptied");
+  });
 
   // ================= Wiring =================
   $("refresh").addEventListener("click", refresh);
