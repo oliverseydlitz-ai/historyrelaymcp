@@ -56,7 +56,7 @@ MCP tools:
 
 Methods handled: `initialize`, `ping`, `tools/list`, `tools/call`. Notifications get a 202.
 
-Telegram notification: after every successful insert (both `POST /card` and `save_card`; the hook lives in `insertCard`), the function calls Telegram Bot API `sendMessage` to `TELEGRAM_CHAT_ID` with the text `Watch card #<id>`. It uses a 3 s AbortController timeout and is wrapped in try/catch. A failure only logs the HTTP status or error name, never the token or URL, and never changes the API/MCP response. If either env var is missing, the call is skipped silently. It is awaited, so a slow Telegram can add up to 3 s to a save.
+Telegram notification: after every successful insert (both `POST /card` and `save_card`; the hook lives in `insertCard`), the function calls Telegram Bot API `sendMessage` to each ID in `TELEGRAM_CHAT_ID` (comma-separated, e.g. `111,222`; sent in parallel) with the text `Watch card #<id>`. It uses a 3 s AbortController timeout and is wrapped in try/catch. A failure only logs the HTTP status or error name, never the token or URL, and never changes the API/MCP response. If either env var is missing, the call is skipped silently. It is awaited, so a slow Telegram can add up to 3 s to a save.
 
 ## Data
 ```sql
