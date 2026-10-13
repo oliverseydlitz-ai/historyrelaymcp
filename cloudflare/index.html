@@ -156,32 +156,19 @@
   @keyframes enter { from { opacity: 0; transform: translateY(0.5rem) scale(0.98); } }
   .card .text { margin: 0; font-size: 1.0625rem; line-height: 1.38; white-space: pre-wrap; overflow-wrap: anywhere; }
   .card .meta { display: flex; justify-content: space-between; gap: 0.75rem; margin-top: 0.5rem; color: var(--label-2); font-size: 0.8125rem; letter-spacing: 0.01em; font-variant-numeric: tabular-nums; }
-  /* Latest card shown on an Apple Watch, in the watch renderer's own font and colors */
-  .hero { display: flex; flex-direction: column; align-items: center; margin: 0.5rem 0 0.75rem; }
-  .hero.enter .watch { animation: watchIn 0.6s cubic-bezier(0.2, 0.9, 0.25, 1) both; }
-  @keyframes watchIn { from { opacity: 0; transform: translateY(0.75rem) scale(0.94); } }
-  .watch {
-    position: relative; width: min(15rem, 62vw); aspect-ratio: 41 / 50; padding: 0.55rem; border-radius: 2.9rem / 3.1rem;
-    background: linear-gradient(150deg, #4a4a50 0%, #1a1a1d 38%, #0c0c0e 62%, #38383d 100%);
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22), inset 0 0 0 1px rgba(255, 255, 255, 0.06),
-      0 28px 50px -18px rgba(0, 0, 0, 0.55), 0 10px 20px -10px rgba(0, 0, 0, 0.35);
+  /* Latest card: a larger card with a soft gradient edge */
+  .hero {
+    position: relative; margin: 0.25rem 0 0.5rem; padding: 1.125rem 1.25rem 1rem; border-radius: 1.25rem;
+    background: linear-gradient(var(--cell), var(--cell)) padding-box,
+                linear-gradient(135deg, rgba(10, 132, 255, 0.85), rgba(191, 90, 242, 0.75)) border-box;
+    border: 1.5px solid transparent;
+    box-shadow: 0 12px 32px -14px rgba(10, 132, 255, 0.45), var(--shadow);
   }
-  .watch .crown { position: absolute; right: -0.42rem; top: 21%; width: 0.6rem; height: 2.3rem; border-radius: 0.3rem;
-    background: repeating-linear-gradient(180deg, #55555b 0 2px, #2c2c30 2px 4px); box-shadow: 1px 0 2px rgba(0, 0, 0, 0.4); }
-  .watch .side-btn { position: absolute; right: -0.26rem; top: 47%; width: 0.36rem; height: 3.1rem; border-radius: 0.2rem; background: linear-gradient(90deg, #26262a, #48484e); }
-  .watch .face {
-    position: relative; height: 100%; border-radius: 2.4rem / 2.6rem; background: #000; overflow: hidden;
-    display: flex; align-items: center; padding: 1.4rem 1.15rem;
-  }
-  .watch .face::after { content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
-    background: linear-gradient(155deg, rgba(255, 255, 255, 0.1), transparent 32%); }
-  .watch-text {
-    width: 100%; max-height: 100%; overflow-y: auto; margin: 0; color: #e5e5ea; font-family: var(--rounded); font-weight: 600;
-    line-height: 1.22; white-space: pre-wrap; overflow-wrap: anywhere; scrollbar-width: none;
-  }
-  .watch-text::-webkit-scrollbar { display: none; }
-  .hero-meta { margin-top: 1rem; color: var(--label-2); font-size: 0.8125rem; letter-spacing: 0.01em; font-variant-numeric: tabular-nums; }
-  .hero-meta b { color: var(--tint); font-weight: 600; }
+  .hero.enter { animation: enter 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+  .hero-eyebrow { display: flex; align-items: center; gap: 0.4375rem; color: var(--tint); font-size: 0.8125rem; font-weight: 600; letter-spacing: 0.01em; margin-bottom: 0.4375rem; }
+  .hero-eyebrow::before { content: ""; width: 0.4375rem; height: 0.4375rem; border-radius: 50%; background: var(--tint); box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.2); }
+  .hero-text { margin: 0; font-family: var(--rounded); font-weight: 600; letter-spacing: -0.01em; line-height: 1.28; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .hero-meta { display: flex; justify-content: space-between; gap: 0.75rem; margin-top: 0.75rem; color: var(--label-2); font-size: 0.8125rem; letter-spacing: 0.01em; font-variant-numeric: tabular-nums; }
   .day-header { font-size: 1.25rem; font-weight: 700; letter-spacing: -0.01em; margin: 1.5rem 0.25rem 0.625rem; }
   .empty { text-align: center; padding: 18vh 1rem 0; color: var(--label-2); }
   .empty svg { width: 3rem; height: 3rem; color: var(--label-3); }
@@ -383,7 +370,7 @@
   }
   @media (prefers-reduced-motion: reduce) {
     .aurora span { animation: none; }
-    .hero.enter .watch { animation: fade 0.2s ease both; }
+    .hero.enter { animation: fade 0.2s ease both; }
     .card.enter { animation: fade 0.2s ease both; }
     @keyframes fade { from { opacity: 0; } }
     .glass-btn.spin svg { animation: none; }
@@ -585,8 +572,8 @@
     if (diff < 7) return d.toLocaleDateString(undefined, { weekday: "long" });
     return d.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "long" });
   }
-  // Watch face type size steps with length, like the renderer that draws the real card.
-  const watchSize = (n) => (n <= 40 ? "1.625rem" : n <= 90 ? "1.3125rem" : n <= 180 ? "1.0625rem" : "0.9375rem");
+  // The latest card's type steps down as it gets longer.
+  const heroSize = (n) => (n <= 60 ? "1.625rem" : n <= 140 ? "1.375rem" : n <= 300 ? "1.1875rem" : "1.0625rem");
 
   // Lock screen clock
   function tickClock() {
@@ -782,16 +769,15 @@
     } else {
       const [latest, ...rest] = cards;
       const nodes = [];
-      // Hero: the latest card on a watch.
+      // The latest card, highlighted.
       const ld = parseDate(latest.created_at);
-      const hero = el("section", "hero" + (seen.has(latest.id) ? "" : " enter"));
+      const hero = el("article", "hero" + (seen.has(latest.id) ? "" : " enter"));
       hero.setAttribute("aria-label", "Latest card");
-      const watch = el("div", "watch"), face = el("div", "face"), wt = el("p", "watch-text", latest.text);
-      wt.style.fontSize = watchSize(latest.text.length);
-      face.append(wt); watch.append(el("span", "crown"), el("span", "side-btn"), face);
-      const hm = el("div", "hero-meta"); hm.innerHTML = "<b>Latest</b>";
-      hm.append(" · #" + latest.id + " · " + ago(ld) + " · " + clock(ld));
-      hero.append(watch, hm);
+      const ht = el("p", "hero-text", latest.text);
+      ht.style.fontSize = heroSize(latest.text.length);
+      const hm = el("div", "hero-meta");
+      hm.append(el("span", null, "#" + latest.id), el("span", null, ago(ld) + " · " + clock(ld)));
+      hero.append(el("div", "hero-eyebrow", "Latest"), ht, hm);
       nodes.push(hero);
       // Everything else, grouped by day.
       let lastDay = null;
