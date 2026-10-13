@@ -260,6 +260,44 @@
   .count-pill.hot { background: rgba(255, 69, 58, 0.16); color: var(--red); }
   .text-btn.danger { color: var(--red); }
 
+  /* Signed-in devices */
+  .device.tappable { cursor: pointer; transition: background 0.3s ease-out; }
+  .device.tappable:active { background: var(--fill); transition: none; }
+  .chev { flex: none; width: 0.5rem; height: 0.875rem; color: var(--label-3); }
+  .role { font-size: 0.6875rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; padding: 0.125rem 0.4375rem; border-radius: 0.3125rem; color: #fff; vertical-align: 0.0625rem; }
+  .role.admin { background: #af52de; }
+  .role.feed { background: var(--tint); }
+
+  /* Bottom sheet: drag the top area down to dismiss */
+  .scrim { position: fixed; inset: 0; z-index: 39; background: rgba(0, 0, 0, 0.42); opacity: 0; pointer-events: none; }
+  .scrim.open { pointer-events: auto; }
+  .sheet {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 40; max-width: 640px; margin: 0 auto; max-height: 88vh;
+    display: none; flex-direction: column; background: var(--bg); border-radius: 1.25rem 1.25rem 0 0;
+    box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.25); will-change: transform;
+  }
+  .sheet-handle { flex: none; touch-action: none; cursor: grab; padding: 0.4375rem 1rem 0.75rem; }
+  .grabber { width: 2.25rem; height: 0.3125rem; border-radius: 999px; background: var(--label-3); margin: 0 auto 0.75rem; }
+  .sheet-head { display: flex; align-items: center; gap: 0.75rem; }
+  .sheet-head .flag { width: 2.75rem; height: 2.75rem; font-size: 1.625rem; }
+  .sheet-head h2 { margin: 0; font-size: 1.25rem; font-weight: 700; letter-spacing: -0.01em; }
+  .sheet-head p { margin: 0.125rem 0 0; color: var(--label-2); font-size: 0.875rem; }
+  .sheet-head > div:not(.flag) { flex: 1; min-width: 0; }
+  .close-btn {
+    flex: none; width: 1.875rem; height: 1.875rem; border-radius: 50%; border: 0; cursor: pointer; display: grid; place-items: center;
+    background: var(--fill); color: var(--label-2);
+  }
+  .close-btn svg { width: 0.75rem; height: 0.75rem; }
+  .sheet-body { flex: 1; overflow-y: auto; overscroll-behavior: contain; padding: 0 1rem calc(1.5rem + env(safe-area-inset-bottom)); }
+  .sheet-body .group-header:first-child { margin-top: 0.5rem; }
+  .kv { position: relative; display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; padding: 0.6875rem 1rem; }
+  .kv .k { flex: none; font-size: 1rem; }
+  .kv .v { color: var(--label-2); font-size: 1rem; text-align: right; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+  .kv .v.mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.875rem; }
+  .ua { padding: 0.6875rem 1rem; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.75rem; color: var(--label-2); overflow-wrap: anywhere; user-select: text; -webkit-user-select: text; }
+  .cell.action.danger { color: var(--red); }
+  a.cell.action { text-decoration: none; }
+
   /* iOS switch */
   .switch { position: relative; flex: none; width: 3.1875rem; height: 1.9375rem; }
   .switch input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
@@ -441,6 +479,10 @@
   </div>
   <p class="group-footer">10 wrong codes in an hour locks the keypad for everyone, including you.</p>
 
+  <h2 class="group-header" id="devicesTitle">Signed-In Devices</h2>
+  <div class="group" id="devicesList"></div>
+  <p class="group-footer">Every phone that unlocked with a correct code. Tap one for details.</p>
+
   <h2 class="group-header" id="bansTitle">Blocked Devices</h2>
   <div class="group" id="bansList"></div>
   <p class="group-footer" id="bansFooter">5 wrong codes from one device within 24 hours blocks it for good. A correct code resets its count.</p>
@@ -459,6 +501,19 @@
     <button class="pill danger" id="emptyTrash">Empty</button>
   </div>
 </section>
+
+<div class="scrim" id="scrim"></div>
+<div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-labelledby="sheetTitle">
+  <div class="sheet-handle" id="sheetHandle">
+    <div class="grabber" aria-hidden="true"></div>
+    <div class="sheet-head">
+      <div class="flag" id="sheetFlag" aria-hidden="true"></div>
+      <div><h2 id="sheetTitle"></h2><p id="sheetSub"></p></div>
+      <button class="close-btn" id="sheetClose" aria-label="Close"><svg viewBox="0 0 12 12" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2 2l8 8M10 2l-8 8"/></svg></button>
+    </div>
+  </div>
+  <div class="sheet-body" id="sheetBody"></div>
+</div>
 
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
@@ -674,9 +729,31 @@
     shake();
   }
 
+  // ================= Device identity (shown to the admin under Signed-In Devices) =================
+  const DEVICE = (() => {
+    let id = null;
+    try {
+      id = localStorage.getItem("watchcards.device");
+      if (!id) {
+        id = crypto.randomUUID ? crypto.randomUUID() : [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, "0")).join("");
+        localStorage.setItem("watchcards.device", id);
+      }
+    } catch { id = null; }
+    const mm = (q) => matchMedia(q).matches;
+    return { id, info: {
+      screen: screen.width + "×" + screen.height, dpr: devicePixelRatio, viewport: innerWidth + "×" + innerHeight,
+      language: navigator.language, languages: (navigator.languages || []).slice(0, 4).join(", "),
+      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone, platform: navigator.platform || "",
+      standalone: !!(navigator.standalone || mm("(display-mode: standalone)")), touch: navigator.maxTouchPoints || 0,
+      cores: navigator.hardwareConcurrency || 0, memory: navigator.deviceMemory || 0,
+      color_scheme: mm("(prefers-color-scheme: dark)") ? "Dark" : "Light", reduced_motion: mm("(prefers-reduced-motion: reduce)"),
+    } };
+  })();
+
   // ================= API =================
   async function post(path, body) {
     try {
+      body = { ...body, device: DEVICE };
       const res = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), cache: "no-store" });
       const status = res.status === 401 ? "wrong" : res.status === 429 ? "limit" : res.status === 403 ? "paused"
         : res.status === 423 ? "blocked" : res.ok ? "ok" : "error";
@@ -754,6 +831,7 @@
   function lock(msg) {
     clearInterval(timer);
     passcode = null; adminCode = null; store.clear(); seen.clear();
+    closeSheet();
     $("foundWrap").hidden = true; $("foundList").replaceChildren();
     closeOpenRow();
     resetKeypad();
@@ -1036,8 +1114,190 @@
     row.append(el("div", "flag", flagOf(d.country)), body, ...right);
     return row;
   }
+  // Version-aware names for the details sheet.
+  function osVersion(ua) {
+    let m;
+    if ((m = ua.match(/(iPhone|iPad).*? OS (\d+)[_.](\d+)/))) return (m[1] === "iPad" ? "iPadOS " : "iOS ") + m[2] + "." + m[3];
+    if ((m = ua.match(/Android (\d+(?:\.\d+)?)/))) return "Android " + m[1];
+    if ((m = ua.match(/Mac OS X (\d+)[_.](\d+)/))) return "macOS " + m[1] + "." + m[2];
+    if (/Windows NT 10/.test(ua)) return "Windows 10/11";
+    if (/Linux/.test(ua)) return "Linux";
+    return "";
+  }
+  function browserVersion(ua) {
+    let m;
+    if ((m = ua.match(/Edg\/(\d+)/))) return "Edge " + m[1];
+    if ((m = ua.match(/CriOS\/(\d+)/))) return "Chrome " + m[1];
+    if ((m = ua.match(/FxiOS\/(\d+)/))) return "Firefox " + m[1];
+    if ((m = ua.match(/Chrome\/(\d+)/))) return "Chrome " + m[1];
+    if ((m = ua.match(/Firefox\/(\d+)/))) return "Firefox " + m[1];
+    if ((m = ua.match(/Version\/(\d+(?:\.\d+)?).*Safari/))) return "Safari " + m[1];
+    return "";
+  }
+  const countryName = (cc) => { try { return new Intl.DisplayNames(undefined, { type: "region" }).of(cc); } catch { return cc; } };
+  const CONTINENTS = { EU: "Europe", NA: "North America", SA: "South America", AS: "Asia", AF: "Africa", OC: "Oceania", AN: "Antarctica" };
+  const fullDate = (s) => parseDate(s).toLocaleString(undefined, { weekday: "short", day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+
+  function renderDevices(sec) {
+    const devices = sec.devices || [];
+    $("devicesTitle").textContent = "Signed-In Devices (" + devices.length + ")";
+    $("devicesList").replaceChildren(...(devices.length ? devices.map((d) => {
+      const you = d.device_id === sec.your_device;
+      const row = el("div", "device tappable");
+      row.tabIndex = 0; row.setAttribute("role", "button");
+      const body = el("div", "device-body");
+      const who = el("div", "who");
+      if (you) who.append(el("span", "you", "This device"), " · ");
+      who.append(deviceName(d.user_agent) + " ");
+      who.append(el("span", "role " + d.role, d.role === "admin" ? "Admin" : "Feed"));
+      body.append(who, el("div", "sub", place(d) + " · " + (ago(parseDate(d.last_seen)) === "Just now" ? "active just now" : "seen " + ago(parseDate(d.last_seen)).toLowerCase())));
+      const chev = el("span"); chev.innerHTML = '<svg class="chev" viewBox="0 0 8 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 1l6 6-6 6"/></svg>';
+      row.append(el("div", "flag", flagOf(d.country)), body, chev);
+      const open = () => openSheet(d, sec, row);
+      row.addEventListener("click", open);
+      row.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); } });
+      return row;
+    }) : [el("div", "list-empty", "No sign-ins yet.")]));
+  }
+
+  // ----- Details sheet -----
+  let sheetAnim = null, sheetY = 0, sheetH = 0, sheetOpen = false, sheetReturn = null;
+  const sheet = $("sheet"), scrim = $("scrim");
+  function sheetSet(y) {
+    sheetY = y;
+    sheet.style.transform = `translateY(${y}px)`;
+    scrim.style.opacity = sheetH ? Math.min(1, Math.max(0, 1 - y / sheetH)) : 0;
+  }
+  function kvGroup(title, rows) {
+    rows = rows.filter((r) => r && r[1] !== undefined && r[1] !== null && r[1] !== "");
+    if (!rows.length) return [];
+    const g = el("div", "group");
+    for (const [k, v, mono] of rows) {
+      const row = el("div", "kv"); row.append(el("span", "k", k), el("span", "v" + (mono ? " mono" : ""), String(v)));
+      g.append(row);
+    }
+    return [el("h2", "group-header", title), g];
+  }
+  function openSheet(d, sec, from) {
+    const you = d.device_id === sec.your_device;
+    const ua = d.user_agent || "", c = d.client || {}, g = d.geo || {};
+    const banned = (sec.bans || []).some((b) => b.ip === d.ip);
+    $("sheetFlag").textContent = flagOf(d.country);
+    $("sheetTitle").textContent = deviceName(ua);
+    $("sheetSub").textContent = (you ? "This device · " : "") + place(d);
+    const yes = (v) => (v ? "Yes" : "No");
+    const lat = Number(g.latitude), lon = Number(g.longitude);
+    const nodes = [
+      ...kvGroup("Activity", [
+        ["Access", d.role === "admin" ? "Admin" : "Feed"],
+        ["Last seen", ago(parseDate(d.last_seen)) + " · " + clock(parseDate(d.last_seen))],
+        ["First seen", fullDate(d.first_seen)],
+        ["Sign-ins", d.logins],
+      ]),
+      ...kvGroup("Device", [
+        ["System", osVersion(ua)], ["Browser", browserVersion(ua)],
+        ["Screen", c.screen && c.screen + (c.dpr ? " @" + c.dpr + "×" : "")], ["Window", c.viewport],
+        ["Language", c.languages || c.language], ["Time zone", c.timezone],
+        ["Home Screen app", c.standalone !== undefined ? yes(c.standalone) : ""],
+        ["Appearance", c.color_scheme], ["Reduce Motion", c.reduced_motion !== undefined ? yes(c.reduced_motion) : ""],
+        ["Touch points", c.touch || ""], ["CPU cores", c.cores || ""], ["Memory", c.memory ? c.memory + " GB" : ""],
+        ["Device ID", d.device_id, true],
+      ]),
+      ...kvGroup("Network", [
+        ["IP address", d.ip, true], ["Provider", d.asn], ["ASN", g.asn ? "AS" + g.asn : ""],
+        ["Cloudflare data center", g.colo], ["Protocol", g.http_protocol], ["Encryption", g.tls_version],
+      ]),
+      ...kvGroup("Location (approximate)", [
+        ["City", d.city], ["Region", g.region], ["Postcode", g.postal_code],
+        ["Country", d.country && flagOf(d.country) + " " + countryName(d.country)],
+        ["Continent", CONTINENTS[g.continent] || g.continent], ["In the EU", g.is_eu !== undefined && d.country ? yes(g.is_eu) : ""],
+        ["Network time zone", g.timezone],
+        ["Coordinates", Number.isFinite(lat) && Number.isFinite(lon) && (lat || lon) ? lat.toFixed(2) + ", " + lon.toFixed(2) : ""],
+      ]),
+    ];
+    if (Number.isFinite(lat) && Number.isFinite(lon) && (lat || lon)) {
+      const g2 = nodes[nodes.length - 1];
+      const maps = Object.assign(el("a", "cell action", "Open in Maps"), { href: `https://maps.apple.com/?ll=${lat},${lon}&q=${encodeURIComponent(place(d))}`, target: "_blank", rel: "noopener" });
+      g2.append(maps);
+    }
+    if (ua) { nodes.push(el("h2", "group-header", "User agent")); const g3 = el("div", "group"); g3.append(el("div", "ua", ua)); nodes.push(g3); }
+    const actions = el("div", "group");
+    if (d.ip && !you) {
+      const b = el("button", "cell action danger", banned ? "Unblock This IP" : "Block This IP");
+      if (banned) b.classList.remove("danger");
+      b.addEventListener("click", async () => {
+        if (!banned && !confirm("Block " + d.ip + " for good? You can unblock it later.")) return;
+        b.disabled = true;
+        if (await adminDo(banned ? "unblock" : "block", { ip: d.ip }, d.ip + (banned ? " unblocked" : " blocked"))) closeSheet();
+        else b.disabled = false;
+      });
+      actions.append(b);
+    }
+    const forget = el("button", "cell action danger", "Forget This Device");
+    forget.addEventListener("click", async () => {
+      if (!confirm("Remove this device from the list? It reappears if it signs in again.")) return;
+      if (await adminDo("forget_device", { device_id: d.device_id }, "Device forgotten")) closeSheet();
+    });
+    actions.append(forget);
+    nodes.push(el("div", "group-header", ""), actions);
+    $("sheetBody").replaceChildren(...nodes);
+    $("sheetBody").scrollTop = 0;
+
+    sheetReturn = from;
+    sheet.style.display = "flex"; scrim.classList.add("open");
+    document.documentElement.style.overflow = "hidden";
+    sheetH = sheet.offsetHeight;
+    if (!sheetOpen) sheetSet(sheetH);
+    sheetOpen = true;
+    sheetAnim && sheetAnim.stop();
+    sheetAnim = spring({ from: sheetY, to: 0, damping: 1, response: 0.38, precision: 0.5, onUpdate: sheetSet });
+    $("sheetClose").focus({ preventScroll: true });
+  }
+  function closeSheet(velocity = 0) {
+    if (!sheetOpen) return;
+    sheetOpen = false;
+    scrim.classList.remove("open");
+    sheetAnim && sheetAnim.stop();
+    sheetAnim = spring({ from: sheetY, to: sheetH, velocity, damping: 1, response: 0.32, precision: 0.5, onUpdate: sheetSet,
+      onDone: () => { sheet.style.display = "none"; document.documentElement.style.overflow = ""; } });
+    if (sheetReturn && document.contains(sheetReturn)) sheetReturn.focus({ preventScroll: true });
+  }
+  $("sheetClose").addEventListener("click", () => closeSheet());
+  scrim.addEventListener("click", () => closeSheet());
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && sheetOpen) closeSheet(); });
+  // Drag the top of the sheet: 1:1 tracking, rubber-band upward, project the flick to decide.
+  (() => {
+    let drag = null;
+    const handle = $("sheetHandle");
+    handle.addEventListener("pointerdown", (e) => {
+      if (!sheetOpen || e.target.closest("button")) return;
+      sheetAnim && sheetAnim.stop();                       // grab it mid-flight
+      handle.setPointerCapture(e.pointerId);
+      drag = { id: e.pointerId, sy: e.clientY, y0: sheetY, hist: [{ y: e.clientY, t: e.timeStamp }] };
+    });
+    handle.addEventListener("pointermove", (e) => {
+      if (!drag || e.pointerId !== drag.id) return;
+      drag.hist.push({ y: e.clientY, t: e.timeStamp });
+      while (drag.hist.length > 2 && e.timeStamp - drag.hist[0].t > 100) drag.hist.shift();
+      let y = drag.y0 + (e.clientY - drag.sy);
+      if (y < 0) y = -rubberband(-y, sheetH);
+      sheetSet(y);
+    });
+    const end = (e) => {
+      if (!drag || e.pointerId !== drag.id) return;
+      const a = drag.hist[0], b = drag.hist[drag.hist.length - 1];
+      const v = b.t > a.t ? ((b.y - a.y) / (b.t - a.t)) * 1000 : 0;
+      drag = null;
+      if (sheetY + project(v) > sheetH * 0.35) closeSheet(v);
+      else { sheetAnim = spring({ from: sheetY, to: 0, velocity: v, damping: Math.abs(v) > 300 ? 0.8 : 1, response: 0.3, precision: 0.5, onUpdate: sheetSet }); }
+    };
+    handle.addEventListener("pointerup", end);
+    handle.addEventListener("pointercancel", end);
+  })();
+
   function renderSecurity(sec) {
     if (!sec) return;
+    renderDevices(sec);
     const bans = sec.bans || [], attempts = sec.attempts || [];
     const banned = new Set(bans.map((b) => b.ip));
     $("bansTitle").textContent = "Blocked Devices (" + bans.length + ")";
