@@ -736,6 +736,13 @@
       color_scheme: mm("(prefers-color-scheme: dark)") ? "Dark" : "Light", reduced_motion: mm("(prefers-reduced-motion: reduce)"),
     } };
   })();
+  // Chrome on Android tells the model (e.g. "Pixel 8") via User-Agent Client Hints; Safari doesn't have this API.
+  try {
+    navigator.userAgentData && navigator.userAgentData.getHighEntropyValues(["model", "platformVersion"]).then((h) => {
+      if (h.model) DEVICE.info.model = h.model;
+      if (h.platformVersion) DEVICE.info.platform_version = h.platformVersion;
+    }).catch(() => {});
+  } catch {}
 
   // ================= API =================
   async function post(path, body) {
@@ -1120,6 +1127,33 @@
     if ((m = ua.match(/Version\/(\d+(?:\.\d+)?).*Safari/))) return "Safari " + m[1];
     return "";
   }
+  // iPhones don't report their model, but each screen size (in points) and pixel density matches a known set.
+  const IPHONE_SCREENS = {
+    "320x568@2": "iPhone 5, 5s, SE (1st gen)",
+    "375x667@2": "iPhone 6, 6s, 7, 8, SE (2nd or 3rd gen)",
+    "414x736@3": "iPhone 6 Plus, 6s Plus, 7 Plus, 8 Plus",
+    "375x812@3": "iPhone X, XS, 11 Pro, 12 mini, 13 mini",
+    "414x896@2": "iPhone XR, 11",
+    "414x896@3": "iPhone XS Max, 11 Pro Max",
+    "390x844@3": "iPhone 12, 12 Pro, 13, 13 Pro, 14, 16e",
+    "428x926@3": "iPhone 12 Pro Max, 13 Pro Max, 14 Plus",
+    "393x852@3": "iPhone 14 Pro, 15, 15 Pro, 16",
+    "430x932@3": "iPhone 14 Pro Max, 15 Plus, 15 Pro Max, 16 Plus",
+    "402x874@3": "iPhone 16 Pro, 17, 17 Pro",
+    "420x912@3": "iPhone Air",
+    "440x956@3": "iPhone 16 Pro Max, 17 Pro Max",
+  };
+  function modelGuess(ua, c) {
+    if (c.model) return c.model;                                   // Android Chrome (client hints)
+    let m = ua.match(/Android [\d.]+; ([^;)]+?)(?: Build|\))/);    // older Android user agents name the model
+    if (m && m[1] !== "K") return m[1].trim();
+    if (/iPhone/.test(ua) && c.screen) {
+      const [a, b] = String(c.screen).split(/[×x]/).map(Number);
+      const key = Math.min(a, b) + "x" + Math.max(a, b) + "@" + Math.round(c.dpr || 0);
+      return IPHONE_SCREENS[key] ? "Likely " + IPHONE_SCREENS[key] : "";
+    }
+    return "";
+  }
   const countryName = (cc) => { try { return new Intl.DisplayNames(undefined, { type: "region" }).of(cc); } catch { return cc; } };
   const CONTINENTS = { EU: "Europe", NA: "North America", SA: "South America", AS: "Asia", AF: "Africa", OC: "Oceania", AN: "Antarctica" };
   const fullDate = (s) => parseDate(s).toLocaleString(undefined, { weekday: "short", day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
@@ -1181,7 +1215,8 @@
         ["Sign-ins", d.logins],
       ]),
       ...kvGroup("Device", [
-        ["System", osVersion(ua)], ["Browser", browserVersion(ua)],
+        ["Model", modelGuess(ua, c)],
+        ["System", c.platform_version && /Android/.test(ua) ? "Android " + c.platform_version : osVersion(ua)], ["Browser", browserVersion(ua)],
         ["Screen", c.screen && c.screen + (c.dpr ? " @" + c.dpr + "×" : "")], ["Window", c.viewport],
         ["Language", c.languages || c.language], ["Time zone", c.timezone],
         ["Home Screen app", c.standalone !== undefined ? yes(c.standalone) : ""],
