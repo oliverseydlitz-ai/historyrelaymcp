@@ -188,6 +188,41 @@ async function restoreFromTrash(trashId: number): Promise<string | null> {
   return null;
 }
 
+// People who messaged the bot recently (Telegram keeps updates for about 24 hours), newest first.
+// Used by the admin page to find a new person's chat ID. Never returns the bot token.
+async function recentBotChats() {
+  const token = env("TELEGRAM_BOT_TOKEN");
+  if (!token) return { error: "TELEGRAM_BOT_TOKEN is not set" };
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 5000);
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${token}/getUpdates?limit=100`, { signal: ctrl.signal });
+    if (!res.ok) return { error: `Telegram returned HTTP ${res.status}` };
+    const body = await res.json();
+    const known = new Set((await getRecipients()).map((r) => r.chat_id));
+    const byChat = new Map<string, Record<string, unknown>>();
+    for (const u of body.result ?? []) {
+      const m = u.message ?? u.edited_message;
+      if (!m?.chat || m.chat.type !== "private") continue;
+      const chatId = String(m.chat.id);
+      const prev = byChat.get(chatId);
+      if (prev && (prev.date as number) >= m.date) continue;
+      byChat.set(chatId, {
+        chat_id: chatId,
+        name: [m.chat.first_name, m.chat.last_name].filter(Boolean).join(" "),
+        username: m.chat.username ?? null,
+        date: new Date(m.date * 1000).toISOString(),
+        known: known.has(chatId),
+      });
+    }
+    return { chats: [...byChat.values()].sort((a, b) => String(b.date).localeCompare(String(a.date))) };
+  } catch (e) {
+    return { error: `Telegram request failed (${e instanceof Error ? e.name : "unknown"})` };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function adminState() {
   const since = new Date(Date.now() - 3600_000).toISOString();
   const [settings, cards, fails, recipients, trash] = await Promise.all([getSettings(), listCards(), recentFailures(), getRecipients(), listTrash()]);
@@ -383,6 +418,8 @@ Deno.serve(async (req) => {
           if (error) throw new Error("empty trash failed");
           break;
         }
+        case "find_chats":
+          return json({ ...(await adminState()), found: await recentBotChats() });
         case "reset_lockout": {
           const { error } = await db.from("feed_failures").delete().gte("id", 0);
           if (error) throw new Error("reset failed");

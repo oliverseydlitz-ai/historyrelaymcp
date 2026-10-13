@@ -229,6 +229,25 @@
   .tile svg { width: 1.125rem; height: 1.125rem; }
   .group > .cell:has(.tile) + .cell:has(.tile)::before { left: 3.625rem; }
 
+  /* Find New Person: people who recently messaged the bot */
+  .find-icon { width: 1.375rem; height: 1.375rem; flex: none; color: var(--tint); }
+  .found-row { position: relative; display: flex; align-items: center; gap: 0.75rem; padding: 0.625rem 1rem; }
+  .avatar {
+    flex: none; width: 2.5rem; height: 2.5rem; border-radius: 50%; display: grid; place-items: center;
+    color: #fff; font-weight: 600; font-size: 1.0625rem; font-family: var(--rounded);
+    background: linear-gradient(160deg, var(--a1, #64d2ff), var(--a2, #0a84ff));
+  }
+  .found-body { flex: 1; min-width: 0; }
+  .found-body .who { font-size: 1.0625rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .found-body .sub { color: var(--label-2); font-size: 0.8125rem; letter-spacing: 0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .found-body .cid { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; color: var(--label); font-size: 0.9375rem; margin-top: 0.0625rem; }
+  .found-actions { flex: none; display: flex; align-items: center; gap: 0.75rem; }
+  .text-btn { border: 0; background: none; color: var(--tint); font-size: 0.9375rem; font-weight: 600; cursor: pointer; padding: 0.375rem 0; }
+  .text-btn:active { opacity: 0.5; }
+  .pill.small { padding: 0.3125rem 0.8125rem; font-size: 0.875rem; }
+  .added { color: var(--label-2); font-size: 0.875rem; }
+  .badge-new { color: var(--green); font-weight: 600; }
+
   /* iOS switch */
   .switch { position: relative; flex: none; width: 3.1875rem; height: 1.9375rem; }
   .switch input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
@@ -390,10 +409,17 @@
   <div class="group">
     <div id="rcptList"></div>
     <button class="cell action" id="rcptAdd"><span class="add-icon" aria-hidden="true"></span>Add Person</button>
+    <button class="cell action" id="findBtn"><svg class="find-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6"/><path d="m15 15 5 5"/></svg><span id="findLabel">Find New Person</span></button>
   </div>
   <div class="group-footer footer-row">
     <span>#1 is you. Everyone needs to tap Start in the bot first.</span>
     <button class="pill" id="rcptSave" disabled>Save</button>
+  </div>
+
+  <div id="foundWrap" hidden>
+    <h2 class="group-header">Messaged the Bot · Last 24 h</h2>
+    <div class="group" id="foundList"></div>
+    <p class="group-footer">New people have to open the bot and tap Start first. Telegram only keeps the last 24 hours.</p>
   </div>
 
   <h2 class="group-header">Security</h2>
@@ -702,6 +728,7 @@
   function lock(msg) {
     clearInterval(timer);
     passcode = null; adminCode = null; store.clear(); seen.clear();
+    $("foundWrap").hidden = true; $("foundList").replaceChildren();
     closeOpenRow();
     resetKeypad();
     hint(msg || "", !!msg);
@@ -904,6 +931,59 @@
       );
     }));
   }
+
+  // ----- Find New Person -----
+  const AVATAR_COLORS = [["#64d2ff", "#0a84ff"], ["#ff9f0a", "#ff375f"], ["#30d158", "#00c7be"], ["#bf5af2", "#5e5ce6"], ["#ffd60a", "#ff9f0a"]];
+  async function copyText(text) {
+    try { await navigator.clipboard.writeText(text); return true; }
+    catch {
+      const t = Object.assign(el("textarea"), { value: text }); document.body.append(t); t.select();
+      const ok = document.execCommand && document.execCommand("copy"); t.remove(); return !!ok;
+    }
+  }
+  function renderFound(found) {
+    $("foundWrap").hidden = false;
+    const list = $("foundList");
+    if (found.error) { list.replaceChildren(el("div", "list-empty", found.error)); return; }
+    if (!found.chats.length) { list.replaceChildren(el("div", "list-empty", "Nobody has messaged the bot in the last 24 hours.")); return; }
+    list.replaceChildren(...found.chats.map((c, i) => {
+      const row = el("div", "found-row");
+      const name = c.name || (c.username ? "@" + c.username : "Unknown");
+      const av = el("div", "avatar", name.trim().charAt(0).toUpperCase() || "?");
+      const [a1, a2] = AVATAR_COLORS[Number(c.chat_id.slice(-2)) % AVATAR_COLORS.length];
+      av.style.setProperty("--a1", a1); av.style.setProperty("--a2", a2);
+      const body = el("div", "found-body");
+      const sub = el("div", "sub");
+      if (i === 0) sub.append(Object.assign(el("span", "badge-new", "Newest"), {}), " · ");
+      sub.append(ago(parseDate(c.date)));
+      body.append(el("div", "who", name), sub, el("div", "cid", c.chat_id + (c.username ? "  ·  @" + c.username : "")));
+      const actions = el("div", "found-actions");
+      const copy = el("button", "text-btn", "Copy");
+      copy.addEventListener("click", async () => toast(await copyText(c.chat_id) ? "Chat ID copied" : "Couldn't copy", false));
+      actions.append(copy);
+      if (c.known) actions.append(el("span", "added", "Added"));
+      else {
+        const add = el("button", "pill small", "Add");
+        add.addEventListener("click", async () => {
+          const rows = collectRecipients();
+          if (!rows) return toast("Fix the red chat IDs first", true);
+          if (rows.length >= 20) return toast("The list is full (20 people)", true);
+          add.disabled = true;
+          if (await adminDo("set_recipients", { recipients: [...rows, { name: c.name || c.username || "", chat_id: c.chat_id }] }, name + " added")) {
+            add.replaceWith(el("span", "added", "Added"));
+          } else add.disabled = false;
+        });
+        actions.append(add);
+      }
+      row.append(av, body, actions);
+      return row;
+    }));
+  }
+  $("findBtn").addEventListener("click", async () => {
+    $("findBtn").disabled = true; $("findLabel").textContent = "Checking Telegram…";
+    if (await adminDo("find_chats", {})) renderFound(adminState.found || { chats: [] });
+    $("findBtn").disabled = false; $("findLabel").textContent = "Find New Person";
+  });
 
   // ----- Recently Deleted -----
   const ICONS = {
