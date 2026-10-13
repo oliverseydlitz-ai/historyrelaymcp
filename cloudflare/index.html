@@ -118,6 +118,18 @@
   .acard + .acard { border-top: 1px solid var(--border); }
   .acard .text { white-space: pre-wrap; word-wrap: break-word; }
   .acard .meta { margin-top: 6px; align-items: center; }
+  .panel > .sub { color: var(--muted); font-size: 13px; }
+  .rcpt { display: grid; grid-template-columns: 28px 1fr 1.3fr 32px; gap: 8px; align-items: center; }
+  .rcpt + .rcpt { margin-top: 8px; }
+  .rcpt .num { color: var(--muted); font-weight: 600; text-align: center; font-variant-numeric: tabular-nums; }
+  .rcpt input {
+    width: 100%; min-width: 0; border-radius: 10px; border: 1px solid var(--border); background: var(--bg);
+    color: var(--text); font: inherit; font-size: 15px; padding: 9px 10px; outline: none;
+  }
+  .rcpt input:focus { border-color: var(--accent); }
+  .rcpt input.bad { border-color: var(--danger); }
+  .rcpt .x { background: none; border: 0; color: var(--muted); font-size: 20px; cursor: pointer; padding: 0; }
+  .rcpt-foot { display: flex; justify-content: space-between; margin-top: 12px; gap: 8px; }
   .toast {
     position: fixed; left: 50%; bottom: calc(24px + env(safe-area-inset-bottom)); transform: translateX(-50%) translateY(120px);
     background: var(--surface-2); border: 1px solid var(--border); color: var(--text); padding: 10px 16px; border-radius: 14px;
@@ -169,10 +181,20 @@
         <label class="switch"><input type="checkbox" data-key="feed_enabled"><span></span></label></div>
       <div class="row"><div><div class="label">Telegram pings</div><div class="sub">Message everyone on each new card</div></div>
         <label class="switch"><input type="checkbox" data-key="telegram_enabled"><span></span></label></div>
-      <div class="row"><div><div class="label">Only me</div><div class="sub">Ping only you, not your friends</div></div>
+      <div class="row"><div><div class="label">Only me</div><div class="sub">Ping only #1 below, not everyone</div></div>
         <label class="switch"><input type="checkbox" data-key="telegram_only_me"><span></span></label></div>
       <div class="row"><div><div class="label">Card text in Telegram</div><div class="sub">Include the card's text, not just its number</div></div>
         <label class="switch"><input type="checkbox" data-key="telegram_include_text"><span></span></label></div>
+    </div>
+
+    <div class="panel">
+      <h2>Telegram recipients</h2>
+      <div class="sub" style="margin:-4px 0 12px">#1 is you. Each person must have tapped Start in the bot.</div>
+      <div id="rcptList"></div>
+      <div class="rcpt-foot">
+        <button class="btn secondary" id="rcptAdd">+ Add person</button>
+        <button class="btn" id="rcptSave">Save</button>
+      </div>
     </div>
 
     <div class="panel">
@@ -379,6 +401,7 @@
       if (!res.ok) return "error";
       adminCode = pc;
       adminState = await res.json();
+      if (action === "set_recipients") rcptDirty = false;
       renderAdmin();
       return "ok";
     } catch { return "error"; }
@@ -392,8 +415,46 @@
     return false;
   }
 
+  // Recipients editor: rows of name + chat ID, saved together with the Save button.
+  let rcptDirty = false;
+  function rcptRow(r, i) {
+    const row = document.createElement("div"); row.className = "rcpt";
+    const num = document.createElement("div"); num.className = "num"; num.textContent = i + 1;
+    const name = Object.assign(document.createElement("input"), { placeholder: "Name", value: r.name || "", maxLength: 40 });
+    const id = Object.assign(document.createElement("input"), { placeholder: "Chat ID", value: r.chat_id || "", inputMode: "numeric" });
+    name.className = "name"; id.className = "cid";
+    const x = Object.assign(document.createElement("button"), { className: "x", textContent: "×", ariaLabel: "Remove" });
+    x.addEventListener("click", () => { row.remove(); renumber(); rcptDirty = true; });
+    [name, id].forEach((el) => el.addEventListener("input", () => { rcptDirty = true; id.classList.remove("bad"); }));
+    row.append(num, name, id, x);
+    return row;
+  }
+  function renumber() { [...$("rcptList").children].forEach((row, i) => { row.querySelector(".num").textContent = i + 1; }); }
+  function renderRecipients(list) {
+    $("rcptList").replaceChildren(...(list.length ? list : [{}]).map(rcptRow));
+    rcptDirty = false;
+  }
+  $("rcptAdd").addEventListener("click", () => {
+    $("rcptList").append(rcptRow({}, $("rcptList").children.length));
+    rcptDirty = true;
+    $("rcptList").lastChild.querySelector(".name").focus();
+  });
+  $("rcptSave").addEventListener("click", async () => {
+    const rows = [...$("rcptList").children].map((row) => ({
+      name: row.querySelector(".name").value.trim(), chat_id: row.querySelector(".cid").value.trim(), el: row.querySelector(".cid"),
+    })).filter((r) => r.name || r.chat_id);
+    const bad = rows.filter((r) => !/^-?\d{5,20}$/.test(r.chat_id));
+    bad.forEach((r) => r.el.classList.add("bad"));
+    if (bad.length) return toast("Chat IDs must be numbers", true);
+    $("rcptSave").disabled = true;
+    await adminDo("set_recipients", { recipients: rows.map(({ name, chat_id }) => ({ name, chat_id })) }, "Recipients saved");
+    $("rcptSave").disabled = false;
+  });
+
   function renderAdmin() {
     const { settings, cards, stats } = adminState;
+    // Don't wipe unsaved edits when another admin action refreshes the state.
+    if (!rcptDirty) renderRecipients(adminState.recipients || []);
     document.querySelectorAll("#admin [data-key]").forEach((el) => { el.checked = !!settings[el.dataset.key]; });
     $("feedFails").textContent = stats.failures_last_hour + " / " + stats.max_failures_per_hour + " in the last hour"
       + (stats.failures_last_hour >= stats.max_failures_per_hour ? " · locked" : "");

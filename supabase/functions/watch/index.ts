@@ -47,13 +47,37 @@ async function getSettings(): Promise<Settings> {
   return out;
 }
 
-// Best-effort Telegram ping to every chat in TELEGRAM_CHAT_ID (comma-separated); never throws, never logs the token.
+// Telegram recipients are edited on the admin page (watch_settings key "telegram_recipients").
+// If that list is empty, fall back to the TELEGRAM_CHAT_ID env var. Row 1 is the owner ("only me").
+type Recipient = { name: string; chat_id: string };
+const MAX_RECIPIENTS = 20;
+
+async function getRecipients(): Promise<Recipient[]> {
+  const { data } = await db.from("watch_settings").select("value").eq("key", "telegram_recipients").maybeSingle();
+  return Array.isArray(data?.value) ? (data.value as Recipient[]) : [];
+}
+
+function cleanRecipients(raw: unknown): Recipient[] | null {
+  if (!Array.isArray(raw) || raw.length > MAX_RECIPIENTS) return null;
+  const out: Recipient[] = [];
+  for (const r of raw) {
+    const name = typeof r?.name === "string" ? r.name.trim().slice(0, 40) : "";
+    const chatId = typeof r?.chat_id === "string" ? r.chat_id.trim() : "";
+    if (!name && !chatId) continue; // skip empty rows
+    if (!/^-?\d{5,20}$/.test(chatId)) return null;
+    out.push({ name, chat_id: chatId });
+  }
+  return out;
+}
+
+// Best-effort Telegram ping to every recipient; never throws, never logs the token.
 async function notifyTelegram(id: number, text: string) {
   const settings = await getSettings();
   if (!settings.telegram_enabled) return;
   const message = settings.telegram_include_text ? `Watch card #${id}\n${text.slice(0, 3500)}` : `Watch card #${id}`;
   const token = env("TELEGRAM_BOT_TOKEN");
-  const allIds = (env("TELEGRAM_CHAT_ID") ?? "").split(",").map((c) => c.trim()).filter(Boolean);
+  const saved = (await getRecipients()).map((r) => r.chat_id);
+  const allIds = saved.length ? saved : (env("TELEGRAM_CHAT_ID") ?? "").split(",").map((c) => c.trim()).filter(Boolean);
   const chatIds = settings.telegram_only_me ? allIds.slice(0, 1) : allIds;
   if (!token || chatIds.length === 0) return;
   const ctrl = new AbortController();
@@ -128,8 +152,8 @@ async function checkPasscode(name: string, given: unknown): Promise<Response | n
 
 async function adminState() {
   const since = new Date(Date.now() - 3600_000).toISOString();
-  const [settings, cards, fails] = await Promise.all([getSettings(), listCards(), recentFailures()]);
-  return { settings, cards, stats: { cards: cards.length, failures_last_hour: fails, max_failures_per_hour: MAX_FAILURES_PER_HOUR, since } };
+  const [settings, cards, fails, recipients] = await Promise.all([getSettings(), listCards(), recentFailures(), getRecipients()]);
+  return { settings, cards, recipients, stats: { cards: cards.length, failures_last_hour: fails, max_failures_per_hour: MAX_FAILURES_PER_HOUR, since } };
 }
 
 async function listCards() {
@@ -290,6 +314,14 @@ Deno.serve(async (req) => {
           const { error } = await db.from("watch_settings")
             .upsert({ key: body.key, value: body.value, updated_at: new Date().toISOString() });
           if (error) throw new Error("setting update failed");
+          break;
+        }
+        case "set_recipients": {
+          const recipients = cleanRecipients(body.recipients);
+          if (!recipients) return json({ error: "each row needs a numeric chat ID (5-20 digits), max 20 rows" }, 400);
+          const { error } = await db.from("watch_settings")
+            .upsert({ key: "telegram_recipients", value: recipients, updated_at: new Date().toISOString() });
+          if (error) throw new Error("recipients update failed");
           break;
         }
         case "reset_lockout": {
