@@ -5,3 +5,6 @@ create table public.feed_failures (
 );
 alter table public.feed_failures enable row level security;
 revoke all on public.feed_failures from anon, authenticated;
+
+-- Separate counters for feed and admin passcodes.
+alter table public.feed_failures add column kind text not null default 'feed';

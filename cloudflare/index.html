@@ -85,6 +85,49 @@
   .meta { display: flex; justify-content: space-between; color: var(--muted); font-size: 12.5px; margin-top: 10px; }
   .badge { color: var(--accent); font-weight: 600; letter-spacing: .04em; text-transform: uppercase; font-size: 11px; }
   .empty { text-align: center; color: var(--muted); padding: 60px 0; }
+
+  .mode-link { background: none; border: 0; color: var(--muted); font: inherit; font-size: 14px; padding: 8px 14px; cursor: pointer; }
+  .dots.long { gap: 10px; }
+  .dots.long .dot { width: 12px; height: 12px; }
+
+  /* Admin */
+  #admin { display: none; padding-bottom: 40px; }
+  .panel { background: var(--surface); border: 1px solid var(--border); border-radius: 18px; padding: 16px; margin-bottom: 14px; }
+  .panel h2 { font-size: 13px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; margin: 0 0 12px; }
+  textarea {
+    width: 100%; min-height: 96px; resize: vertical; border-radius: 12px; border: 1px solid var(--border);
+    background: var(--bg); color: var(--text); font: inherit; padding: 12px; outline: none;
+  }
+  textarea:focus { border-color: var(--accent); }
+  .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .row + .row { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border); }
+  .row .label { font-weight: 500; }
+  .row .sub { color: var(--muted); font-size: 13px; }
+  .btn {
+    border: 0; border-radius: 12px; padding: 10px 16px; font: inherit; font-weight: 600; cursor: pointer;
+    background: linear-gradient(135deg, var(--accent), var(--accent-2)); color: #fff;
+  }
+  .btn.secondary { background: var(--surface-2); color: var(--text); font-weight: 500; }
+  .btn.danger { background: transparent; color: var(--danger); padding: 6px 8px; font-weight: 500; font-size: 14px; }
+  .btn:disabled { opacity: .5; }
+  .compose-foot { display: flex; justify-content: space-between; align-items: center; margin-top: 10px; color: var(--muted); font-size: 13px; }
+  .switch { position: relative; width: 51px; height: 31px; flex: none; }
+  .switch input { opacity: 0; width: 0; height: 0; position: absolute; }
+  .switch span { position: absolute; inset: 0; border-radius: 31px; background: var(--border); transition: background .2s; cursor: pointer; }
+  .switch span::after { content: ""; position: absolute; top: 2px; left: 2px; width: 27px; height: 27px; border-radius: 50%; background: #fff; transition: transform .2s; }
+  .switch input:checked + span { background: #34c759; }
+  .switch input:checked + span::after { transform: translateX(20px); }
+  .acard { padding: 12px 0; }
+  .acard + .acard { border-top: 1px solid var(--border); }
+  .acard .text { white-space: pre-wrap; word-wrap: break-word; }
+  .acard .meta { margin-top: 6px; align-items: center; }
+  .toast {
+    position: fixed; left: 50%; bottom: calc(24px + env(safe-area-inset-bottom)); transform: translateX(-50%) translateY(120px);
+    background: var(--surface-2); border: 1px solid var(--border); color: var(--text); padding: 10px 16px; border-radius: 14px;
+    font-size: 14px; transition: transform .25s; z-index: 10; max-width: calc(100% - 32px);
+  }
+  .toast.show { transform: translateX(-50%) translateY(0); }
+  .toast.err { color: var(--danger); }
 </style>
 </head>
 <body>
@@ -93,8 +136,9 @@
     <div class="logo"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="3"/><path d="M9 6V3h6v3M9 18v3h6v-3M12 10v2l1.5 1.5"/></svg></div>
     <h1>Watch Cards</h1>
     <p class="hint" id="hint">Enter passcode</p>
-    <div class="dots" id="dots"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
+    <div class="dots" id="dots"></div>
     <div class="pad" id="pad"></div>
+    <button class="mode-link" id="modeBtn">Admin</button>
   </section>
 
   <section id="feed">
@@ -107,7 +151,46 @@
     </header>
     <div id="list"></div>
   </section>
+
+  <section id="admin">
+    <header>
+      <div><h1>Admin</h1><div class="status" id="adminStatus"></div></div>
+      <div class="actions">
+        <button class="icon-btn" id="adminRefresh" aria-label="Refresh"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v4h-4"/></svg></button>
+        <button class="icon-btn" id="adminExit" aria-label="Lock"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg></button>
+      </div>
+    </header>
+
+    <div class="panel">
+      <h2>New card</h2>
+      <textarea id="compose" maxlength="1000" placeholder="Write a card…"></textarea>
+      <div class="compose-foot"><span id="count">0 / 1000</span><button class="btn" id="send">Post card</button></div>
+    </div>
+
+    <div class="panel">
+      <h2>Settings</h2>
+      <div class="row"><div><div class="label">Feed page</div><div class="sub">Friends can open the feed with the passcode</div></div>
+        <label class="switch"><input type="checkbox" data-key="feed_enabled"><span></span></label></div>
+      <div class="row"><div><div class="label">Telegram pings</div><div class="sub">Message everyone on each new card</div></div>
+        <label class="switch"><input type="checkbox" data-key="telegram_enabled"><span></span></label></div>
+      <div class="row"><div><div class="label">Card text in Telegram</div><div class="sub">Include the card's text, not just its number</div></div>
+        <label class="switch"><input type="checkbox" data-key="telegram_include_text"><span></span></label></div>
+    </div>
+
+    <div class="panel">
+      <h2>Security</h2>
+      <div class="row"><div><div class="label">Wrong feed codes</div><div class="sub" id="feedFails"></div></div>
+        <button class="btn secondary" id="resetLockout">Reset lockout</button></div>
+      <div class="row"><div><div class="label">Wrong admin codes</div><div class="sub" id="adminFails"></div></div></div>
+    </div>
+
+    <div class="panel">
+      <h2 id="cardsTitle">Cards</h2>
+      <div id="adminList"></div>
+    </div>
+  </section>
 </div>
+<div class="toast" id="toast"></div>
 
 <script>
 (() => {
@@ -119,6 +202,17 @@
   };
   const $ = (id) => document.getElementById(id);
   let code = "", passcode = null, timer = null, busy = false;
+  let mode = "feed";            // "feed" (4 digits) or "admin" (8 digits)
+  let adminCode = null;         // admin code lives in memory only, never in storage
+  const codeLen = () => (mode === "admin" ? 8 : 4);
+
+  function setMode(m) {
+    mode = m; code = "";
+    $("dots").replaceChildren(...Array.from({ length: codeLen() }, () => Object.assign(document.createElement("span"), { className: "dot" })));
+    $("dots").classList.toggle("long", m === "admin");
+    $("modeBtn").textContent = m === "admin" ? "Back to feed" : "Admin";
+    hint(m === "admin" ? "Enter admin code" : "Enter passcode");
+  }
 
   // Keypad
   const keys = ["1","2","3","4","5","6","7","8","9","","0","⌫"];
@@ -130,6 +224,7 @@
     b.addEventListener("click", () => press(k));
     $("pad").appendChild(b);
   }
+  setMode("feed");
   document.addEventListener("keydown", (e) => {
     if ($("lock").style.display === "none") return;
     if (/^\d$/.test(e.key)) press(e.key);
@@ -144,18 +239,20 @@
   async function press(k) {
     if (busy) return;
     if (k === "⌫") code = code.slice(0, -1);
-    else if (code.length < 4) code += k;
+    else if (code.length < codeLen()) code += k;
     drawDots();
-    if (code.length === 4) {
+    if (code.length === codeLen()) {
       busy = true;
       hint("Checking…");
-      const r = await load(code);
+      const r = mode === "admin" ? await adminCall("state", {}, code) : await load(code);
       busy = false;
-      if (r === "ok") { store.set(code); showFeed(); }
-      else {
+      if (r === "ok") {
+        if (mode === "admin") showAdmin(); else { store.set(code); showFeed(); }
+      } else {
         $("dots").classList.add("shake");
         setTimeout(() => $("dots").classList.remove("shake"), 400);
-        hint(r === "limit" ? "Too many attempts. Try again later." : r === "wrong" ? "Wrong passcode" : "Can't reach server", true);
+        hint(r === "limit" ? "Too many attempts. Try again later." : r === "wrong" ? "Wrong code"
+          : r === "paused" ? "The feed is paused right now." : "Can't reach server", true);
         code = ""; drawDots();
       }
     }
@@ -172,6 +269,7 @@
       });
       if (res.status === 401) return "wrong";
       if (res.status === 429) return "limit";
+      if (res.status === 403) return "paused";
       if (!res.ok) return "error";
       const { cards } = await res.json();
       passcode = pc;
@@ -224,6 +322,7 @@
     const r = await load(passcode);
     $("refresh").classList.remove("spin");
     if (r === "wrong") lock("Passcode changed. Enter the new one.");
+    else if (r === "paused") lock("The feed is paused right now.");
     else if (r !== "ok") $("status").textContent = "Offline · retrying";
   }
 
@@ -235,11 +334,103 @@
   }
   function lock(msg) {
     clearInterval(timer);
-    passcode = null; code = ""; store.clear(); drawDots();
+    passcode = null; adminCode = null; store.clear();
+    setMode("feed");
     $("feed").style.display = "none";
+    $("admin").style.display = "none";
     $("lock").style.display = "flex";
-    hint(msg || "Enter passcode", !!msg);
+    if (msg) hint(msg, true);
   }
+
+  // ---- Admin ----
+  let adminState = null;
+  function toast(msg, err) {
+    const t = $("toast"); t.textContent = msg; t.classList.toggle("err", !!err); t.classList.add("show");
+    clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove("show"), 2200);
+  }
+
+  // Every admin request re-sends the code; the server checks it each time.
+  async function adminCall(action, extra, codeOverride) {
+    const pc = codeOverride ?? adminCode;
+    try {
+      const res = await fetch("/admin", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ passcode: pc, action, ...extra }),
+        cache: "no-store",
+      });
+      if (res.status === 401) return "wrong";
+      if (res.status === 429) return "limit";
+      if (!res.ok) return "error";
+      adminCode = pc;
+      adminState = await res.json();
+      renderAdmin();
+      return "ok";
+    } catch { return "error"; }
+  }
+
+  async function adminDo(action, extra, okMsg) {
+    const r = await adminCall(action, extra);
+    if (r === "ok") { if (okMsg) toast(okMsg); return true; }
+    if (r === "wrong") { lock("Admin code changed."); return false; }
+    toast(r === "limit" ? "Locked: too many wrong codes" : "Something went wrong", true);
+    return false;
+  }
+
+  function renderAdmin() {
+    const { settings, cards, stats } = adminState;
+    document.querySelectorAll("#admin [data-key]").forEach((el) => { el.checked = !!settings[el.dataset.key]; });
+    $("feedFails").textContent = stats.feed_failures_last_hour + " / 10 in the last hour" + (stats.feed_failures_last_hour >= 10 ? " · locked" : "");
+    $("adminFails").textContent = stats.admin_failures_last_hour + " / 5 in the last hour";
+    $("cardsTitle").textContent = "Cards (" + cards.length + ")";
+    $("adminStatus").textContent = "updated " + clock(new Date());
+    const list = $("adminList");
+    list.replaceChildren();
+    if (!cards.length) list.append(Object.assign(document.createElement("div"), { className: "sub", textContent: "No cards yet." }));
+    for (const c of cards) {
+      const d = parseDate(c.created_at);
+      const el = document.createElement("div"); el.className = "acard";
+      const text = document.createElement("div"); text.className = "text"; text.textContent = c.text;
+      const meta = document.createElement("div"); meta.className = "meta";
+      const info = document.createElement("span"); info.textContent = "#" + c.id + " · " + ago(d) + " · " + clock(d);
+      const del = document.createElement("button"); del.className = "btn danger"; del.textContent = "Delete";
+      del.addEventListener("click", async () => {
+        if (!confirm("Delete card #" + c.id + "?")) return;
+        del.disabled = true;
+        if (!(await adminDo("delete", { id: c.id }, "Card #" + c.id + " deleted"))) del.disabled = false;
+      });
+      meta.append(info, del);
+      el.append(text, meta);
+      list.append(el);
+    }
+  }
+
+  function showAdmin() {
+    clearInterval(timer);
+    $("lock").style.display = "none";
+    $("feed").style.display = "none";
+    $("admin").style.display = "block";
+    window.scrollTo(0, 0);
+  }
+
+  $("modeBtn").addEventListener("click", () => setMode(mode === "admin" ? "feed" : "admin"));
+  $("adminExit").addEventListener("click", () => lock());
+  $("adminRefresh").addEventListener("click", () => adminDo("state", {}));
+  $("compose").addEventListener("input", () => { $("count").textContent = $("compose").value.length + " / 1000"; });
+  $("send").addEventListener("click", async () => {
+    const text = $("compose").value.trim();
+    if (!text) return toast("Write something first", true);
+    $("send").disabled = true;
+    if (await adminDo("post", { text }, "Card posted")) { $("compose").value = ""; $("count").textContent = "0 / 1000"; }
+    $("send").disabled = false;
+  });
+  document.querySelectorAll("#admin [data-key]").forEach((el) => el.addEventListener("change", async () => {
+    el.disabled = true;
+    const ok = await adminDo("set", { key: el.dataset.key, value: el.checked }, "Saved");
+    if (!ok) el.checked = !el.checked;
+    el.disabled = false;
+  }));
+  $("resetLockout").addEventListener("click", () => adminDo("reset_lockout", {}, "Lockout reset"));
 
   $("refresh").addEventListener("click", refresh);
   $("lockBtn").addEventListener("click", () => lock());

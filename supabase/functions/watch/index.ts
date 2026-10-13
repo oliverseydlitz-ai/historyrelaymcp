@@ -30,8 +30,27 @@ function validateText(raw: unknown): string | null {
   return t.length === 0 || t.length > MAX_LEN ? null : t;
 }
 
+// Runtime settings (admin page). Missing rows fall back to these defaults.
+const DEFAULT_SETTINGS = { feed_enabled: true, telegram_enabled: true, telegram_include_text: false };
+type Settings = typeof DEFAULT_SETTINGS;
+
+async function getSettings(): Promise<Settings> {
+  const out = { ...DEFAULT_SETTINGS };
+  const { data, error } = await db.from("watch_settings").select("key, value");
+  if (error || !data) return out;
+  for (const row of data) {
+    if (row.key in out && typeof row.value === typeof out[row.key as keyof Settings]) {
+      (out as Record<string, unknown>)[row.key] = row.value;
+    }
+  }
+  return out;
+}
+
 // Best-effort Telegram ping to every chat in TELEGRAM_CHAT_ID (comma-separated); never throws, never logs the token.
-async function notifyTelegram(id: number) {
+async function notifyTelegram(id: number, text: string) {
+  const settings = await getSettings();
+  if (!settings.telegram_enabled) return;
+  const message = settings.telegram_include_text ? `Watch card #${id}\n${text.slice(0, 3500)}` : `Watch card #${id}`;
   const token = env("TELEGRAM_BOT_TOKEN");
   const chatIds = (env("TELEGRAM_CHAT_ID") ?? "").split(",").map((c) => c.trim()).filter(Boolean);
   if (!token || chatIds.length === 0) return;
@@ -43,7 +62,7 @@ async function notifyTelegram(id: number) {
         const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ chat_id: chatId, text: `Watch card #${id}` }),
+          body: JSON.stringify({ chat_id: chatId, text: message }),
           signal: ctrl.signal,
         });
         if (!res.ok) console.error(`telegram sendMessage failed: HTTP ${res.status}`);
@@ -62,7 +81,7 @@ async function insertCard(text: string) {
   // Keep only the newest 50 rows.
   const { data: old } = await db.from("watch_cards").select("id").order("id", { ascending: false }).range(50, 1000);
   if (old && old.length) await db.from("watch_cards").delete().in("id", old.map((r) => r.id));
-  await notifyTelegram(data.id as number);
+  await notifyTelegram(data.id as number, text);
   return { id: data.id as number, created_at: data.created_at as string };
 }
 
@@ -73,19 +92,45 @@ async function latestCard() {
   return data[0] ?? null;
 }
 
-// Feed page passcode: global limit on wrong guesses, since a 4-digit code is easy to brute-force.
-const MAX_FAILURES_PER_HOUR = 10;
+// Passcodes: global limit on wrong guesses per kind, since short codes are easy to brute-force.
+// Feed and admin are counted separately so a feed lockout can't lock out the admin.
+const MAX_FAILURES_PER_HOUR = { feed: 10, admin: 5 };
+type FailureKind = keyof typeof MAX_FAILURES_PER_HOUR;
 
-async function recentFailures(): Promise<number> {
+async function recentFailures(kind: FailureKind): Promise<number> {
   const since = new Date(Date.now() - 3600_000).toISOString();
-  const { count, error } = await db.from("feed_failures").select("id", { count: "exact", head: true }).gte("created_at", since);
+  const { count, error } = await db.from("feed_failures").select("id", { count: "exact", head: true })
+    .eq("kind", kind).gte("created_at", since);
   if (error) throw new Error("failure count failed");
   return count ?? 0;
 }
 
-async function recordFailure() {
-  await db.from("feed_failures").insert({});
+async function recordFailure(kind: FailureKind) {
+  await db.from("feed_failures").insert({ kind });
   await db.from("feed_failures").delete().lt("created_at", new Date(Date.now() - 86400_000).toISOString());
+}
+
+// Checks a passcode against env var `name`, enforcing the per-kind rate limit. Returns an error Response or null if OK.
+async function checkPasscode(name: string, kind: FailureKind, given: unknown): Promise<Response | null> {
+  const expected = env(name);
+  if (!expected) return json({ error: "disabled" }, 404);
+  if ((await recentFailures(kind)) >= MAX_FAILURES_PER_HOUR[kind]) return json({ error: "too many attempts, try again later" }, 429);
+  if (typeof given !== "string" || !(await safeEqual(given.trim(), expected))) {
+    await recordFailure(kind);
+    return json({ error: "wrong passcode" }, 401);
+  }
+  return null;
+}
+
+async function adminState() {
+  const since = new Date(Date.now() - 3600_000).toISOString();
+  const [settings, cards, feedFails, adminFails] = await Promise.all([
+    getSettings(),
+    listCards(),
+    recentFailures("feed"),
+    recentFailures("admin"),
+  ]);
+  return { settings, cards, stats: { cards: cards.length, feed_failures_last_hour: feedFails, admin_failures_last_hour: adminFails, since } };
 }
 
 async function listCards() {
@@ -198,16 +243,51 @@ Deno.serve(async (req) => {
     }
 
     if (path === "/cards" && req.method === "POST") {
-      const passcode = env("FEED_PASSCODE");
-      if (!passcode) return json({ error: "feed disabled" }, 404);
-      if ((await recentFailures()) >= MAX_FAILURES_PER_HOUR) return json({ error: "too many attempts, try again later" }, 429);
       let body: any;
       try { body = await req.json(); } catch { return json({ error: "invalid JSON" }, 400); }
-      if (typeof body?.passcode !== "string" || !(await safeEqual(body.passcode.trim(), passcode))) {
-        await recordFailure();
-        return json({ error: "wrong passcode" }, 401);
-      }
+      if (!(await getSettings()).feed_enabled) return json({ error: "feed paused" }, 403);
+      const denied = await checkPasscode("FEED_PASSCODE", "feed", body?.passcode);
+      if (denied) return denied;
       return json({ cards: await listCards() });
+    }
+
+    if (path === "/admin" && req.method === "POST") {
+      let body: any;
+      try { body = await req.json(); } catch { return json({ error: "invalid JSON" }, 400); }
+      const denied = await checkPasscode("ADMIN_PASSCODE", "admin", body?.passcode);
+      if (denied) return denied;
+
+      switch (body.action ?? "state") {
+        case "state":
+          break;
+        case "post": {
+          const text = validateText(body.text);
+          if (text === null) return json({ error: "text must be 1-1000 characters" }, 400);
+          await insertCard(text);
+          break;
+        }
+        case "delete": {
+          if (!Number.isInteger(body.id)) return json({ error: "id must be an integer" }, 400);
+          const { error } = await db.from("watch_cards").delete().eq("id", body.id);
+          if (error) throw new Error("delete failed");
+          break;
+        }
+        case "set": {
+          if (!(body.key in DEFAULT_SETTINGS) || typeof body.value !== "boolean") return json({ error: "unknown setting" }, 400);
+          const { error } = await db.from("watch_settings")
+            .upsert({ key: body.key, value: body.value, updated_at: new Date().toISOString() });
+          if (error) throw new Error("setting update failed");
+          break;
+        }
+        case "reset_lockout": {
+          const { error } = await db.from("feed_failures").delete().eq("kind", "feed");
+          if (error) throw new Error("reset failed");
+          break;
+        }
+        default:
+          return json({ error: "unknown action" }, 400);
+      }
+      return json(await adminState());
     }
 
     if (path === "/card/latest" && req.method === "GET") {

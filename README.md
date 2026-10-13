@@ -13,6 +13,7 @@ Tiny private API + MCP server: a Supabase edge function (Deno) backed by Postgre
 | GET | `/health` | none | `{"ok": true}` |
 | GET | `/` | none | Feed page for phones (served by the Cloudflare Worker) |
 | POST | `/cards` | `{"passcode"}` | Newest 50 cards, if the passcode matches `FEED_PASSCODE` (10 wrong tries/hour max) |
+| POST | `/admin` | `{"passcode"}` | Admin actions for the admin page (`ADMIN_PASSCODE`, 8 digits, 5 wrong tries/hour max) |
 | POST | `/mcp/<MCP_PATH_SECRET>` | secret path | MCP Streamable HTTP (stateless, JSON). Tools: `save_card`, `get_latest_card` |
 
 ```sh
@@ -27,7 +28,7 @@ curl "https://watch.oliverseydlitz.com/card/latest?format=text" \
 ## Setup
 1. **Database**: `supabase/migrations/*_watch_cards.sql` (already applied to the project).
 2. **Edge function**: `supabase/functions/watch/index.ts`, deployed with JWT verification **off** (the function checks its own tokens).
-3. **Secrets**: Supabase dashboard -> Edge Functions -> Secrets. Add `WRITE_TOKEN`, `READ_TOKEN`, `MCP_PATH_SECRET` (each e.g. `openssl rand -hex 24`, or generated in a password manager). Optional: `FEED_PASSCODE` (4 digits, enables the feed page). Optional: `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` (comma-separate several IDs to notify several people) to get a "Watch card #<id>" Telegram message on every new card (skipped if either is missing).
+3. **Secrets**: Supabase dashboard -> Edge Functions -> Secrets. Add `WRITE_TOKEN`, `READ_TOKEN`, `MCP_PATH_SECRET` (each e.g. `openssl rand -hex 24`, or generated in a password manager). Optional: `FEED_PASSCODE` (4 digits, enables the feed page) and `ADMIN_PASSCODE` (8 digits, enables the admin page). Optional: `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` (comma-separate several IDs to notify several people) to get a "Watch card #<id>" Telegram message on every new card (skipped if either is missing).
 4. **Domain**: Cloudflare dashboard -> Workers & Pages -> Create -> Worker -> paste `cloudflare/worker.js` -> Deploy -> Settings -> Domains & Routes -> Add -> Custom domain -> `watch.oliverseydlitz.com`. Cloudflare creates the DNS record.
 5. **Claude.ai**: Settings -> Connectors -> Add custom connector -> `https://watch.oliverseydlitz.com/mcp/<MCP_PATH_SECRET>` (no auth).
 
