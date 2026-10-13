@@ -31,7 +31,8 @@ function validateText(raw: unknown): string | null {
 }
 
 // Runtime settings (admin page). Missing rows fall back to these defaults.
-const DEFAULT_SETTINGS = { feed_enabled: true, telegram_enabled: true, telegram_include_text: false };
+// telegram_only_me: ping only the first ID in TELEGRAM_CHAT_ID (the owner) instead of everyone.
+const DEFAULT_SETTINGS = { feed_enabled: true, telegram_enabled: true, telegram_include_text: false, telegram_only_me: false };
 type Settings = typeof DEFAULT_SETTINGS;
 
 async function getSettings(): Promise<Settings> {
@@ -52,7 +53,8 @@ async function notifyTelegram(id: number, text: string) {
   if (!settings.telegram_enabled) return;
   const message = settings.telegram_include_text ? `Watch card #${id}\n${text.slice(0, 3500)}` : `Watch card #${id}`;
   const token = env("TELEGRAM_BOT_TOKEN");
-  const chatIds = (env("TELEGRAM_CHAT_ID") ?? "").split(",").map((c) => c.trim()).filter(Boolean);
+  const allIds = (env("TELEGRAM_CHAT_ID") ?? "").split(",").map((c) => c.trim()).filter(Boolean);
+  const chatIds = settings.telegram_only_me ? allIds.slice(0, 1) : allIds;
   if (!token || chatIds.length === 0) return;
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 3000);
