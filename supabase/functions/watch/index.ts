@@ -329,11 +329,30 @@ async function recentBotChats() {
   }
 }
 
+// Admin notes: a small notepad on the admin page, stored as watch_settings key "admin_notes".
+type Note = { title: string; body: string; updated_at: string };
+async function getNotes(): Promise<Note[]> {
+  const { data } = await db.from("watch_settings").select("value").eq("key", "admin_notes").maybeSingle();
+  return Array.isArray(data?.value) ? (data.value as Note[]) : [];
+}
+function cleanNotes(raw: unknown): Note[] | null {
+  if (!Array.isArray(raw) || raw.length > 50) return null;
+  const now = new Date().toISOString();
+  const out: Note[] = [];
+  for (const n of raw) {
+    const title = typeof n?.title === "string" ? n.title.trim().slice(0, 80) : "";
+    const body = typeof n?.body === "string" ? n.body.slice(0, 4000) : "";
+    if (!title && !body.trim()) continue;
+    out.push({ title, body, updated_at: typeof n?.updated_at === "string" ? n.updated_at.slice(0, 40) : now });
+  }
+  return out;
+}
+
 async function adminState(client: Client, yourDevice?: string) {
   const since = new Date(Date.now() - 3600_000).toISOString();
-  const [settings, cards, fails, recipients, trash, security] = await Promise.all(
-    [getSettings(), listCards(), recentFailures(), getRecipients(), listTrash(), securityState(client, yourDevice)]);
-  return { settings, cards, recipients, trash, security, stats: { cards: cards.length, failures_last_hour: fails, max_failures_per_hour: MAX_FAILURES_PER_HOUR, since } };
+  const [settings, cards, fails, recipients, trash, security, notes] = await Promise.all(
+    [getSettings(), listCards(), recentFailures(), getRecipients(), listTrash(), securityState(client, yourDevice), getNotes()]);
+  return { settings, cards, recipients, trash, security, notes, stats: { cards: cards.length, failures_last_hour: fails, max_failures_per_hour: MAX_FAILURES_PER_HOUR, since } };
 }
 
 async function listCards() {
@@ -559,6 +578,14 @@ Deno.serve(async (req) => {
           const last = lastFail ?? lastDevice;
           const { count } = await db.from("feed_failures").select("id", { count: "exact", head: true }).eq("ip", body.ip);
           await db.from("watch_bans").upsert({ ip: body.ip, failures: count ?? 0, ...(last ?? {}), banned_at: new Date().toISOString() });
+          break;
+        }
+        case "set_notes": {
+          const notes = cleanNotes(body.notes);
+          if (!notes) return json({ error: "max 50 notes" }, 400);
+          const { error } = await db.from("watch_settings")
+            .upsert({ key: "admin_notes", value: notes, updated_at: new Date().toISOString() });
+          if (error) throw new Error("notes update failed");
           break;
         }
         case "forget_device": {

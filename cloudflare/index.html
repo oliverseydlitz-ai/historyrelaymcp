@@ -281,6 +281,16 @@
   .cell.action.danger { color: var(--red); }
   a.cell.action { text-decoration: none; }
 
+  /* Notes */
+  .note { position: relative; padding: 0.625rem 1rem 0.5rem; }
+  .note-title { width: 100%; border: 0; outline: none; background: transparent; color: var(--label); font: inherit; font-size: 1.0625rem; font-weight: 600; padding: 0.125rem 0; }
+  .note-body {
+    display: block; width: 100%; min-height: 4.5rem; resize: vertical; border: 0; outline: none; background: transparent;
+    color: var(--label); font-family: inherit; font-size: 0.9375rem; line-height: 1.4; padding: 0.25rem 0; overflow-wrap: anywhere;
+  }
+  .note-foot { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; color: var(--label-2); font-size: 0.75rem; }
+  .note-actions { display: flex; gap: 1rem; }
+
   /* iOS switch */
   .switch { position: relative; flex: none; width: 3.1875rem; height: 1.9375rem; }
   .switch input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
@@ -471,6 +481,16 @@
 
   <h2 class="group-header">Wrong Codes · Last 24 h</h2>
   <div class="group" id="attemptsList"></div>
+
+  <h2 class="group-header">Notes</h2>
+  <div class="group">
+    <div id="notesList"></div>
+    <button class="cell action" id="noteAdd"><span class="add-icon" aria-hidden="true"></span>Add Note</button>
+  </div>
+  <div class="group-footer footer-row">
+    <span>Only visible in admin. Keep secrets in your password manager too.</span>
+    <button class="pill" id="notesSave" disabled>Save</button>
+  </div>
 
   <h2 class="group-header" id="cardsTitle">Cards</h2>
   <div class="group" id="adminList"></div>
@@ -820,6 +840,7 @@
   function lock(msg) {
     clearInterval(timer);
     passcode = null; adminCode = null; store.clear(); seen.clear();
+    notesDirty = false; $("notesList").replaceChildren();
     closeSheet();
     $("foundWrap").hidden = true; $("foundList").replaceChildren();
     closeOpenRow();
@@ -860,6 +881,7 @@
     if (!rcptDirty) renderRecipients(adminState.recipients || []);   // don't wipe unsaved edits
     renderAdminCards(cards);
     renderTrash(adminState.trash || []);
+    renderNotes(adminState.notes || []);
     renderSecurity(adminState.security);
   }
 
@@ -1346,6 +1368,49 @@
       return deviceRow(a, { you, right, sub: "Last try " + ago(parseDate(a.last)).toLowerCase() + (banned.has(a.ip) ? " · blocked" : "") });
     }) : [el("div", "list-empty", "No wrong codes in the last 24 hours.")]));
   }
+
+  // ----- Notes -----
+  let notesDirty = false;
+  function markNotesDirty() { notesDirty = true; $("notesSave").disabled = false; }
+  function noteRow(n) {
+    const row = el("div", "note");
+    const title = Object.assign(el("input", "note-title"), { placeholder: "Title", value: n.title || "", maxLength: 80 });
+    const body = Object.assign(el("textarea", "note-body"), { placeholder: "Note", value: n.body || "", maxLength: 4000 });
+    title.setAttribute("aria-label", "Note title"); body.setAttribute("aria-label", "Note text");
+    row.dataset.updated = n.updated_at || "";
+    const touch = () => { row.dataset.updated = new Date().toISOString(); markNotesDirty(); };
+    title.addEventListener("input", touch); body.addEventListener("input", touch);
+    const foot = el("div", "note-foot");
+    foot.append(el("span", null, n.updated_at ? "Edited " + ago(parseDate(n.updated_at)).toLowerCase() : "New note"));
+    const actions = el("div", "note-actions");
+    const copy = el("button", "text-btn", "Copy");
+    copy.addEventListener("click", async () => toast(await copyText(body.value) ? "Note copied" : "Couldn't copy", false));
+    const del = el("button", "text-btn danger", "Delete");
+    del.addEventListener("click", () => {
+      if (!confirm("Delete the note \"" + (title.value || "Untitled") + "\"? Tap Save to make it final.")) return;
+      row.remove(); markNotesDirty();
+    });
+    actions.append(copy, del); foot.append(actions);
+    row.append(title, body, foot);
+    return row;
+  }
+  function renderNotes(list) {
+    if (notesDirty) return;                      // don't wipe unsaved edits
+    $("notesList").replaceChildren(...list.map(noteRow));
+    $("notesSave").disabled = true;
+  }
+  $("noteAdd").addEventListener("click", () => {
+    const row = noteRow({ title: "", body: "" });
+    $("notesList").append(row); markNotesDirty(); row.querySelector(".note-title").focus();
+  });
+  $("notesSave").addEventListener("click", async () => {
+    const notes = [...$("notesList").children].map((row) => ({
+      title: row.querySelector(".note-title").value, body: row.querySelector(".note-body").value, updated_at: row.dataset.updated || undefined,
+    }));
+    $("notesSave").disabled = true;
+    notesDirty = false;
+    if (!(await adminDo("set_notes", { notes }, "Notes saved"))) { notesDirty = true; $("notesSave").disabled = false; }
+  });
 
   // ----- Recently Deleted -----
   const ICONS = {
