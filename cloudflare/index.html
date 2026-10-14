@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#f2f2f7" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#111113" media="(prefers-color-scheme: dark)">
 <meta name="color-scheme" content="light dark">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -35,7 +35,7 @@
   }
   @media (prefers-color-scheme: dark) {
     :root {
-      --bg: #000000;
+      --bg: #111113;
       --cell: #1c1c1e;
       --label: #ffffff;
       --label-2: rgba(235, 235, 245, 0.6);
@@ -46,7 +46,7 @@
       --tint: #0a84ff;
       --red: #ff453a;
       --green: #30d158;
-      --material: rgba(18, 18, 20, 0.72);
+      --material: rgba(17, 17, 19, 0.75);
       --glass: rgba(44, 44, 46, 0.7);
       --glass-edge: rgba(255, 255, 255, 0.12);
       --shadow: none;
@@ -99,7 +99,7 @@
   .glass-btn.spin svg { animation: spin 0.8s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
 
-  .large-title { font-size: 2.125rem; line-height: 1.12; font-weight: 700; letter-spacing: -0.015em; margin: 0.25rem 0 0.125rem; }
+  .large-title { font-size: 1.625rem; line-height: 1.15; font-weight: 700; letter-spacing: -0.012em; margin: 0.25rem 0 0.125rem; }
   .subtitle { color: var(--label-2); font-size: 0.9375rem; margin: 0 0 1.25rem; min-height: 1.3em; font-variant-numeric: tabular-nums; }
 
   /* ---------- Lock screen (iPhone passcode) ---------- */
@@ -388,20 +388,19 @@
   </div>
 </section>
 
-<div class="glow" aria-hidden="true"></div>
 
 <!-- Feed -->
 <section id="feed" class="screen page">
   <div class="nav">
     <div class="nav-bar">
-      <span class="nav-title">Watch Cards</span>
+      <span class="nav-title">Feed</span>
       <div class="nav-actions">
         <button class="glass-btn" id="refresh" aria-label="Refresh"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v4h-4"/></svg></button>
         <button class="glass-btn" id="lockBtn" aria-label="Lock"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><rect x="5" y="11" width="14" height="10" rx="2.5"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg></button>
       </div>
     </div>
   </div>
-  <h1 class="large-title">Watch Cards</h1>
+  <h1 class="large-title">Feed</h1>
   <p class="subtitle" id="status"></p>
   <div id="list"></div>
 </section>
