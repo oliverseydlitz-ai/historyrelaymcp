@@ -777,6 +777,7 @@
       hero.setAttribute("aria-label", "Latest card");
       const ht = el("p", "hero-text", latest.text);
       ht.style.fontSize = heroSize(latest.text.length);
+      if (latest.text.length > 180) ht.style.fontWeight = "500";   // long cards: lighter, easier to read
       const hm = el("div", "hero-meta");
       hm.append(el("span", null, "#" + latest.id), el("span", null, ago(ld) + " · " + clock(ld)));
       hero.append(el("div", "hero-eyebrow", "Latest"), ht, hm);
