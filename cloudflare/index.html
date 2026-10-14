@@ -781,6 +781,7 @@
   // ================= Feed =================
   const seen = new Set();
   function renderFeed(cards) {
+    lastCards = cards; lastRender = Date.now();
     const list = $("list");
     const firstRender = seen.size === 0;
     if (!cards.length) {
@@ -820,12 +821,24 @@
     $("status").textContent = cards.length + (cards.length === 1 ? " card" : " cards") + " · Updated " + clock(new Date());
   }
 
-  async function refresh() {
-    if (!passcode || current !== "feed") return;
-    $("refresh").classList.add("spin");
-    const { status, data } = await post("/cards", { passcode });
+  // Live updates: poll every 5 s, but only while the feed is actually on screen. Each poll sends the version it
+  // has; the server replies "unchanged" (a few bytes) unless a card was added, deleted or restored.
+  const POLL_MS = 5000;
+  let feedVersion = null, lastCards = null, lastRender = 0, polling = false;
+  const onScreen = () => document.visibilityState === "visible" && current === "feed" && !!passcode;
+  async function refresh(manual = false) {
+    if (!onScreen() || polling) return;
+    polling = true;
+    if (manual) $("refresh").classList.add("spin");
+    const { status, data } = await post("/cards", { passcode, version: manual ? null : feedVersion, poll: !manual });
     $("refresh").classList.remove("spin");
-    if (status === "ok") renderFeed(data.cards);
+    polling = false;
+    if (status === "ok") {
+      if (data.version) feedVersion = data.version;
+      if (data.cards) renderFeed(data.cards);
+      else if (lastCards && Date.now() - lastRender > 60000) renderFeed(lastCards);   // keep "x min ago" fresh
+      else $("status").textContent = $("status").textContent.replace(/Updated .*$|Offline · retrying/, "Updated " + clock(new Date()));
+    }
     else if (status === "wrong") lock("Passcode changed. Enter the new one.");
     else if (status === "paused") lock("The feed is paused right now.");
     else if (status === "blocked") lock(BLOCKED_MSG);
@@ -834,12 +847,13 @@
 
   function showFeed() {
     show("feed");
-    clearInterval(timer); timer = setInterval(refresh, 30000);
+    clearInterval(timer); timer = setInterval(() => refresh(), POLL_MS);
   }
 
   function lock(msg) {
     clearInterval(timer);
     passcode = null; adminCode = null; store.clear(); seen.clear();
+    feedVersion = null; lastCards = null;
     notesDirty = false; $("notesList").replaceChildren();
     closeSheet();
     $("foundWrap").hidden = true; $("foundList").replaceChildren();
@@ -1444,7 +1458,7 @@
   });
 
   // ================= Wiring =================
-  $("refresh").addEventListener("click", refresh);
+  $("refresh").addEventListener("click", () => refresh(true));
   $("lockBtn").addEventListener("click", () => lock());
   $("adminExit").addEventListener("click", () => lock());
   $("adminRefresh").addEventListener("click", async () => {
@@ -1452,20 +1466,20 @@
     await adminDo("state", {});
     $("adminRefresh").classList.remove("spin");
   });
-  document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(); });
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(); });   // catch up the moment it's back on screen
 
   // Start: auto-unlock with a remembered feed code (still verified by the server).
   resetKeypad();
   const saved = store.get();
   if (!saved) { show("lock"); return; }
   post("/cards", { passcode: saved }).then(({ status, data }) => {
-    if (status === "ok") { passcode = saved; renderFeed(data.cards); showFeed(); }
+    if (status === "ok") { passcode = saved; feedVersion = data.version || null; renderFeed(data.cards); showFeed(); }
     else if (status === "wrong" || status === "paused" || status === "blocked") {
       store.clear(); show("lock");
       if (status === "paused") hint("The feed is paused right now.", true);
       if (status === "blocked") hint(BLOCKED_MSG, true);
     }
-    else { passcode = saved; show("feed"); $("status").textContent = "Offline · retrying"; timer = setInterval(refresh, 30000); }
+    else { passcode = saved; show("feed"); $("status").textContent = "Offline · retrying"; timer = setInterval(() => refresh(), POLL_MS); }
   });
 })();
 </script>

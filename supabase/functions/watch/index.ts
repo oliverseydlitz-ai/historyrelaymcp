@@ -473,9 +473,14 @@ Deno.serve(async (req) => {
       if (!(await getSettings()).feed_enabled) return json({ error: "feed paused" }, 403);
       if (!env("FEED_PASSCODE")) return json({ error: "disabled" }, 404);
       if (!(await matches("FEED_PASSCODE", body?.passcode))) return await wrongCode(client!);
-      await rightCode(client!);
+      if (!body?.poll) await rightCode(client!);        // background polls skip the reset (already done on sign-in)
       await recordLogin(client!, "feed", body?.device, false);
-      return json({ cards: await listCards() });
+      // The page polls every few seconds with the version it has. Answer with just "unchanged" when nothing moved,
+      // so most polls are one tiny id-only query instead of resending every card.
+      const { data: ids } = await db.from("watch_cards").select("id").order("id", { ascending: false }).limit(50);
+      const version = (ids ?? []).map((r) => r.id).join(",");
+      if (typeof body?.version === "string" && body.version === version) return json({ unchanged: true, version });
+      return json({ cards: await listCards(), version });
     }
 
     // The keypad: one 4-digit code decides between the admin panel and the feed.
